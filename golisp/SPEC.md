@@ -213,11 +213,12 @@ The rules are in DESIGN.md §4.2. The audits added these:
 - **[F14] The package name is *not* exempt.** A package's own name is never
   in scope, so exempting it only makes `(package time)` +
   `(type time ...)` declare an unexported `time` by accident.
-- **[F16] Declaring an exempt name requires `-`.** A package-level or local
-  declaration of an exempt name written bare (`(type error ...)`,
+- **[F16] Declaring a predeclared name requires `-`.** A package-level or
+  local declaration of a name from the frozen predeclared list written bare (`(type error ...)`,
   `(func string ...)`, `(:= len 3)`) is an error. Write `-error` to shadow on
   purpose, or `Error` to export. References are unaffected. This is still
-  purely lexical.
+  purely lexical. `main`, `init` and import names may be declared bare
+  (`(func main ...)`, a local `path` shadowing the import `path`).
 - **[A12] Import names are exempt, in this file.** That covers explicit
   aliases (verbatim, validated by F7) and implicit names. **[F17]** The
   implicit name is guessed precisely:
@@ -226,8 +227,10 @@ The rules are in DESIGN.md §4.2. The audits added these:
      use the earlier element instead.
   3. Remove a `.vN` suffix.
 
-  If the result isn't a valid Go identifier (`go-yaml`), the import must
-  have an alias, or it's an error. Blank and dot imports add no names. If the
+  If the result isn't a valid Go identifier (`go-yaml`), the import adds no
+  name, and references to it are written with `-` (`-yaml.marshal`) or the
+  import gets an alias. (Refined during implementation: this used to be an
+  error.) Blank and dot imports add no names. If the
   real package name differs from the guess, Go reports the undefined name,
   so nothing is silently misbound.
 - **[A13]** Import exemptions are per file, so a bare `path` can mean the

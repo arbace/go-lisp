@@ -1,0 +1,93 @@
+;go:build linux || darwin
+(package main)
+
+(import
+  "fmt"
+  [str "strings"]
+  [_ "embed"])
+
+(type shape (interface
+  (area [] [float64])
+  fmt.stringer
+  (Type [] [string])))
+
+(type rect (struct
+  [w h float64]
+  [name string `json:"name"`]
+  [-cache float64]
+  [(* -base)]))
+
+(type list [t any] (struct
+  [-head (* (:index -node t))]))
+
+(type number (interface
+  (| (~ int) (~ float64))))
+
+(const
+  (sunday weekday = iota)
+  (monday))
+
+(var [-x -y] = 1 2)
+
+;go:noinline
+(func [-r (* rect)] area [] [float64]
+  (return (* -r.w -r.h)))
+
+(func Map [t any, u any] [-xs (:slice-of t), -f (func [t] [u])] [(:slice-of u)]
+  (:= -out (make (:slice-of u) 0 (len -xs)))
+  (for [_ -x (range -xs)]
+    (= -out (append -out (-f -x))))
+  (return -out))
+
+(func -split [-s string] [:_ string string]
+  (return (:slice -s :_ 1) (:slice -s 1 :_)))
+
+(func -asm [-x int] [int])
+
+(func main [] []
+  (:= -r (:lit rect (:kv w 3) (:kv h 4)))
+  (:= -ps (:lit (:slice-of point) (:lit :_ 1 2) (:lit :_ (:kv x 3))))
+  (var -n int = 0)
+  (if [(:= [-v -ok] (:index -m "k"))] -ok
+    (fmt.println -v)
+    (else if (> -n 0)
+      (return))
+    (else
+      (panic "no")))
+  (for [(:= -i 0) (< -i 10) (++ -i)]
+    (+= -n (- (* -i (- -i 1)) (- 5))))
+  (for []
+    (break))
+  (for [(range -ch)])
+  (defer ((func [] [] ())))
+  (go (-work (& -r)))
+  (switch -n
+    (case [1 2]
+      (fmt.println "small")
+      (fallthrough))
+    (default
+      (fmt.println (str.to-upper "big") (:slice -a 1 -n) (:slice -b :_ :_) (:slice -c 1 2 3) (:assert -x int))))
+  (:type-switch [-v -x]
+    (case [int string]
+      (-use -v))
+    (case [nil]))
+  (select
+    (case (<- -out -v))
+    (case (:= [-y -ok] (<- -in))
+      (-got -y -ok))
+    (default))
+  (if (|| (&& (> -n 0) (< -n 10)) (! -done))
+    (<- -ch 1))
+  (:label -outer
+    (for [-k -v (range -m)]
+      (if (== -k "")
+        (continue -outer))
+      (= _ -v)))
+  (fmt.printf "%v %c\n" '\n' -args ...)
+  (:= -p (:sel ((:sel ((* t) nil) -f)) -g.-h))
+  (var -ch2 (<-chan (chan<- int)))
+  (= _ (:lit (:array-of ... int) 1 2))
+  (= _ (:lit (map string int) (:kv "a" 1)))
+  (= _ (:lit (struct)))
+  (:= -len 3)
+  (= _ (+ 0x1p-2 3i 1_000)))
