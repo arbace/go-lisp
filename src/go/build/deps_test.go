@@ -381,7 +381,10 @@ var depsRules = `
 	go/doc/comment, go/parser, internal/lazyregexp, text/template
 	< go/doc;
 
-	go/build/constraint, go/doc, go/parser, internal/buildcfg, internal/goroot, internal/goversion, internal/platform, internal/syslist
+	# go-lisp: the go-lisp file header reader, used by go/build and cmd/go.
+	FMT < internal/golisp;
+
+	go/build/constraint, go/doc, go/parser, internal/buildcfg, internal/golisp, internal/goroot, internal/goversion, internal/platform, internal/syslist
 	< go/build;
 
 	# images

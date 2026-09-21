@@ -34,7 +34,7 @@ func ScanDir(path string, tags map[string]bool) ([]string, []string, error) {
 			dir = fs.FileInfoToDirEntry(info)
 		}
 
-		if dir.Type().IsRegular() && !strings.HasPrefix(name, "_") && !strings.HasPrefix(name, ".") && strings.HasSuffix(name, ".go") && MatchFile(name, tags) {
+		if dir.Type().IsRegular() && !strings.HasPrefix(name, "_") && !strings.HasPrefix(name, ".") && (strings.HasSuffix(name, ".go") || strings.HasSuffix(name, ".lgo")) && MatchFile(name, tags) { // go-lisp: .lgo files
 			files = append(files, filepath.Join(path, name))
 		}
 	}
@@ -56,7 +56,7 @@ Files:
 			return nil, nil, err
 		}
 		var list []string
-		data, err := ReadImports(r, false, &list)
+		data, err := readImports(name, r, &list) // go-lisp: also .lgo files
 		r.Close()
 		if err != nil {
 			return nil, nil, fmt.Errorf("reading %s: %v", name, err)
@@ -79,7 +79,7 @@ Files:
 		}
 		numFiles++
 		m := imports
-		if strings.HasSuffix(name, "_test.go") {
+		if strings.HasSuffix(name, "_test.go") || strings.HasSuffix(name, "_test.lgo") { // go-lisp: .lgo files
 			m = testImports
 		}
 		for _, p := range list {

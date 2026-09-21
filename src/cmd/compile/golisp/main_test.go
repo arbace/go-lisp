@@ -6,6 +6,7 @@ package main
 
 import (
 	"bytes"
+	"internal/golisp"
 	"internal/testenv"
 	"os"
 	"os/exec"
@@ -181,4 +182,25 @@ func TestBuildErrorNames(t *testing.T) {
 	if !strings.Contains(msgs.String(), `-my-count + "a"`) {
 		t.Errorf("error does not use go-lisp names:\n%s", msgs.String())
 	}
+}
+
+// FuzzGoNameAgreement checks that internal/golisp, which the go command
+// uses to find test functions, maps names like the compiler does.
+func FuzzGoNameAgreement(f *testing.F) {
+	for _, s := range []string{"test-total", "-helper", "serve-HTTP", "len", "t", "a--b", "x?", "_", "-", "Map", "变量"} {
+		f.Add(s, false)
+		f.Add(s, true)
+	}
+	f.Fuzz(func(t *testing.T, s string, member bool) {
+		if syntax.IsLispKeyword(s) && !member {
+			return // the compiler rejects keywords as bare names; golisp need not
+		}
+		want, err := syntax.LispGoName(s, member)
+		if err != nil {
+			want = ""
+		}
+		if got := golisp.GoName(s, member); got != want {
+			t.Errorf("GoName(%q, %v) = %q; compiler maps it to %q (%v)", s, member, got, want, err)
+		}
+	})
 }

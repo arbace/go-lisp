@@ -1767,7 +1767,7 @@ func (p *Package) exeFromFiles() string {
 		return ""
 	}
 	_, elem := filepath.Split(src)
-	return elem[:len(elem)-len(".go")]
+	return elem[:len(elem)-len(filepath.Ext(elem))] // go-lisp: .go or .lgo
 }
 
 // DefaultExecName returns the default executable name for a package
@@ -2938,7 +2938,7 @@ func PackagesAndErrors(ld *modload.Loader, ctx context.Context, opts PackageOpts
 		// Listing is only supported with all patterns referring to either:
 		// - Files that are part of the same directory.
 		// - Explicit package paths or patterns.
-		if strings.HasSuffix(p, ".go") {
+		if strings.HasSuffix(p, ".go") || strings.HasSuffix(p, ".lgo") { // go-lisp: .lgo files
 			// We need to test whether the path is an actual Go file and not a
 			// package path or pattern ending in '.go' (see golang.org/issue/34653).
 			if fi, err := fsys.Stat(p); err == nil && !fi.IsDir() {
@@ -3280,7 +3280,7 @@ func GoFilesPackage(ld *modload.Loader, ctx context.Context, opts PackageOpts, g
 	modload.Init(ld)
 
 	for _, f := range gofiles {
-		if !strings.HasSuffix(f, ".go") {
+		if !strings.HasSuffix(f, ".go") && !strings.HasSuffix(f, ".lgo") { // go-lisp: .lgo files
 			pkg := new(Package)
 			pkg.Internal.Local = true
 			pkg.Internal.CmdlineFiles = true

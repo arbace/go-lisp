@@ -148,6 +148,9 @@ func GetPackage(modroot, pkgdir string) (*IndexPackage, error) {
 	}
 	modroot = filepath.Clean(modroot)
 	pkgdir = filepath.Clean(pkgdir)
+	if hasLispFiles(pkgdir) { // go-lisp: load .lgo packages with go/build
+		return nil, errLispFiles
+	}
 	return openIndexPackage(modroot, pkgdir)
 }
 

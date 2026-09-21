@@ -227,3 +227,17 @@ func lispIsMajorVersion(s string) bool {
 	_, err := strconv.ParseUint(s[1:], 10, 64)
 	return err == nil
 }
+
+// LispGoName returns the Go name of the go-lisp name s, as a bare name
+// (member == false) or as a member name (a selector, field, or method
+// name), in a file that imports no packages. It is used by tools and to
+// check other implementations of the mapping.
+func LispGoName(s string, member bool) (string, error) {
+	return newLispNamer(nil).goName(s, member)
+}
+
+// IsLispKeyword reports whether s is a Go keyword, which go-lisp does
+// not accept as a bare name.
+func IsLispKeyword(s string) bool {
+	return lispGoKeywords[s]
+}

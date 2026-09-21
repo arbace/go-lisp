@@ -276,8 +276,21 @@ writing `SPEC.md`:
 | 2. Printer (Go → go-lisp) | done: `syntax/lisp_printer.go`, `syntax.GoToLisp`; prints every valid Go file in `$GOROOT` |
 | 3. Parser (go-lisp → AST) | done: `syntax/lisp_parser.go`, `syntax.ParseLisp`. The round trip is exact for all 11,588 valid Go files in `$GOROOT/src` and `$GOROOT/test`, and fuzzed. |
 | 4. Compiler hook | done: one line in `noder/noder.go` (`syntax.ParserFor`). `go tool compile` accepts `.lgo` files. 966 `$GOROOT/test` run programs converted to go-lisp behave identically to the Go originals (`go test cmd/compile/internal/syntax -run TestLispRunCorpus -lisprun`). 15 programs that inspect their own line numbers are excluded (F12). |
-| 5. `go build` support | not started |
+| 5. `go build` support | done: the go command lists, builds, runs, and tests packages with `.lgo` files, alone or mixed with `.go` files, including `_test.lgo` files (internal and external test packages), `;go:build` constraints, OS/arch file suffixes, `;go:embed`, and file arguments (`go run main.lgo`). Header reading is shared in the new std package `internal/golisp` (used by `go/build` and `cmd/go`). Test: `go test cmd/go -run TestScript/golisp`. |
 | 6. Tooling | done: `go tool golisp` (`src/cmd/compile/golisp`) with `go2lisp`, `lisp2go` (gofmt-formatted, with parentheses added: `syntax.LispToGo`, F9), `build` and `run` (main packages of `.lgo` and `.go` files). `build`/`run` report compiler errors with go-lisp spellings of names (`-gonames` turns this off); expressions in messages stay in Go syntax. Go → go-lisp → Go reproduces every valid Go file in `$GOROOT`. |
+
+### Known limits of go command support
+
+- **Vet:** `go vet` and the vet step of `go test` skip packages that have
+  `.lgo` files, because vet reads Go syntax only.
+- **Other Go-syntax tools** don't read `.lgo` files: `go fmt`, `-cover`,
+  cgo, gopls, and other `go/ast`-based tools.
+- **Examples:** go-lisp examples compile but aren't run, because there are
+  no `// Output:` comments.
+- **Module cache:** `.lgo` files in modules in the module cache are not
+  seen, because the whole-module index reads Go files only. This covers
+  dependencies fetched from a proxy. The main module, workspace modules and
+  `replace` directories work.
 
 ## Decided
 

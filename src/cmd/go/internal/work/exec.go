@@ -1684,6 +1684,10 @@ func (b *Builder) vet(ctx context.Context, a *Action) error {
 		return nil
 	}
 
+	if hasLispFiles(a.Package) { // go-lisp: vet cannot read go-lisp files
+		return nil
+	}
+
 	vcfg := a.Deps[0].vetCfg
 	if vcfg == nil {
 		// Vet config should only be missing if the build failed.

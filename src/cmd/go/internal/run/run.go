@@ -98,7 +98,7 @@ func runRun(ctx context.Context, cmd *base.Command, args []string) {
 	}()
 
 	i := 0
-	for i < len(args) && strings.HasSuffix(args[i], ".go") {
+	for i < len(args) && (strings.HasSuffix(args[i], ".go") || strings.HasSuffix(args[i], ".lgo")) { // go-lisp: .lgo files
 		i++
 	}
 	pkgOpts := load.PackageOpts{MainOnly: true}

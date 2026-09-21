@@ -895,7 +895,7 @@ Found:
 		}
 
 		name := d.Name()
-		ext := nameExt(name)
+		ext := goNameExt(name) // go-lisp: .lgo files are Go files
 
 		info, err := ctxt.matchFile(p.Dir, name, allTags, &p.BinaryOnly, fset)
 		if err != nil && strings.HasSuffix(name, ".go") {
@@ -945,7 +945,7 @@ Found:
 			}
 		}
 
-		isTest := strings.HasSuffix(name, "_test.go")
+		isTest := strings.HasSuffix(name, "_test.go") || strings.HasSuffix(name, "_test.lgo") // go-lisp: .lgo files
 		isXTest := false
 		if isTest && strings.HasSuffix(pkg, "_test") && p.Name != pkg {
 			isXTest = true
@@ -1459,7 +1459,7 @@ func (ctxt *Context) matchFile(dir, name string, allTags map[string]bool, binary
 	}
 	ext := name[i:]
 
-	if ext != ".go" && fileListForExt(&dummyPkg, ext) == nil {
+	if ext != ".go" && !isLispFile(name) && fileListForExt(&dummyPkg, ext) == nil { // go-lisp: .lgo files
 		// skip
 		return nil, nil
 	}
@@ -1479,8 +1479,8 @@ func (ctxt *Context) matchFile(dir, name string, allTags map[string]bool, binary
 		return nil, err
 	}
 
-	if strings.HasSuffix(name, ".go") {
-		err = readGoInfo(f, info)
+	if isGoOrLispFile(name) { // go-lisp: .lgo files
+		err = readSourceInfo(name, f, info) // go-lisp: .lgo files
 		if strings.HasSuffix(name, "_test.go") {
 			binaryOnly = nil // ignore //go:binary-only-package comments in _test.go files
 		}

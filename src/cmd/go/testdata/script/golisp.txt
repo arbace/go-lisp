@@ -1,0 +1,108 @@
+# go-lisp (.lgo) files are Go source files for the go command:
+# they are listed, built, run, and tested like .go files.
+
+go list -f '{{.GoFiles}} {{.Imports}}' .
+stdout '^\[helper.go main.lgo\] \[example.com/demo/emb example.com/demo/geom fmt\]$'
+go list -f '{{.GoFiles}} {{.IgnoredGoFiles}} {{.TestGoFiles}} {{.XTestGoFiles}}' ./geom
+stdout '^\[geom.lgo\] \[ignored.lgo\] \[geom_test.lgo\] \[x_test.lgo\]$'
+go list -f '{{.GoFiles}} {{.IgnoredGoFiles}} {{.EmbedPatterns}}' ./emb
+[GOOS:linux] stdout '^\[emb.lgo emb_linux.lgo\] \[emb_windows.lgo\] \[hello.txt\]$'
+stdout ' \[hello.txt\]$'
+
+go build -o demo$GOEXE .
+exec ./demo$GOEXE
+stdout '^area: 12 embedded hi$'
+
+go run .
+stdout '^area: 12 embedded hi$'
+
+# named files
+go run main.lgo helper.go
+stdout '^area: 12 embedded hi$'
+
+# tests in go-lisp, in the package and in an external test package
+go test -v ./geom
+stdout '^--- PASS: TestTotal'
+stdout '^--- PASS: TestCircle'
+
+# vet does not read go-lisp files; packages with them are not vetted
+go vet ./...
+
+# compile errors point into the go-lisp source
+! go build ./bad
+stderr 'bad[/\\]bad.lgo:4:'
+
+-- go.mod --
+module example.com/demo
+
+go 1.28
+-- main.lgo --
+(package main)
+
+(import "fmt" "example.com/demo/geom" "example.com/demo/emb")
+
+(func main [] []
+  (fmt.println (greeting) (geom.total (:lit geom.rect (:kv :w 3) (:kv :h 4))) emb.message))
+-- helper.go --
+package main
+
+func Greeting() string { return "area:" }
+-- geom/geom.lgo --
+;go:build !never
+
+(package geom)
+
+(import "math")
+
+(type shape (interface (area [] [float64])))
+(type rect (struct [w h float64]))
+(type circle (struct [r float64]))
+
+(func [-r rect] area [] [float64] (return (* -r.w -r.h)))
+(func [-c circle] area [] [float64] (return (* math.Pi -c.r -c.r)))
+
+(func total [-shapes (... shape)] [float64]
+  (var -sum float64)
+  (for [_ -s (range -shapes)]
+    (+= -sum (-s.area)))
+  (return -sum))
+-- geom/ignored.lgo --
+;go:build never
+
+(package geom)
+
+(this is not valid)
+-- geom/geom_test.lgo --
+(package geom)
+
+(import "testing")
+
+(func test-total [-t (* testing.T)] []
+  (if (!= (total (:lit rect (:kv :w 2) (:kv :h 3)) (:lit rect (:kv :w 1) (:kv :h 1))) 7)
+    (-t.error "wrong total")))
+-- geom/x_test.lgo --
+(package geom_test)
+
+(import "testing" "example.com/demo/geom")
+
+(func test-circle [-t (* testing.t)] []
+  (if (< (geom.total (:lit geom.circle (:kv :r 1))) 3.14)
+    (-t.error "too small")))
+-- emb/emb.lgo --
+(package emb)
+
+(import [_ "embed"])
+
+;go:embed hello.txt
+(var message string)
+-- emb/hello.txt --
+embedded hi
+-- emb/emb_linux.lgo --
+(package emb)
+-- emb/emb_windows.lgo --
+(package emb)
+-- bad/bad.lgo --
+(package bad)
+
+(func f [] [int]
+  (return "not an int"))

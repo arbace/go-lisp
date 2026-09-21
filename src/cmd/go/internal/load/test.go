@@ -785,7 +785,7 @@ func (t *testFuncs) load(fset *token.FileSet, filename, pkg string, doImport, se
 		return err
 	}
 	defer src.Close()
-	f, err := parser.ParseFile(fset, filename, src, parser.ParseComments|parser.SkipObjectResolution)
+	f, err := parseTestFile(fset, filename, src, parser.ParseFile) // go-lisp: also .lgo files
 	if err != nil {
 		return err
 	}

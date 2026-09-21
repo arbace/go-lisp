@@ -56,6 +56,13 @@ The goal is painless merges from upstream golang/go.
   `... build`, `... go2lisp x.go`, `... lisp2go x.lgo`. The tool lives in
   `src/cmd/compile/golisp` because it imports `cmd/compile/internal/syntax`.
 - Compile a go-lisp file by hand: `bin/go tool compile -p main -importcfg CFG -o x.o x.lgo`.
-  The only upstream hook is in `noder/noder.go` (`git grep 'go-lisp:'`).
+- go command support: `bin/go build/run/test` work on `.lgo` packages.
+  Test: `bin/go test cmd/go -run 'TestScript/^golisp$'`.
+- Upstream hooks (all marked, `git grep 'go-lisp:'`): `noder/noder.go`
+  (parser choice); `go/build/build.go` and `deps_test.go`; `cmd/go`
+  `fsys`, `imports`, `load`, `modindex`, `run`, and `work` (vet skip). New
+  shared code lives in `src/internal/golisp` (the header reader used by
+  `go/build` and `cmd/go`), plus `lisp*.go` / `read_lisp.go` files next to
+  each hook.
 - After changing the compiler, rebuild the toolchain with
   `bin/go install cmd/compile`, or rerun `make.bash`.
