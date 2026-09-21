@@ -55,7 +55,7 @@ func LoadPackage(filenames []string) {
 				}
 				defer f.Close()
 
-				p.file, _ = syntax.Parse(fbase, f, p.error, p.pragma, syntax.CheckBranches) // errors are tracked via p.error
+				p.file, _ = syntax.ParserFor(filename)(fbase, f, p.error, p.pragma, syntax.CheckBranches) // errors are tracked via p.error; go-lisp: parser by file extension
 			}()
 		}
 	}()

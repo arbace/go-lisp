@@ -967,3 +967,25 @@ func (p *lispPrinter) switchStmt(s *SwitchStmt) {
 	p.indent--
 	p.print(")")
 }
+
+// GoToLisp parses the Go source src and returns it as go-lisp source,
+// keeping its //go: directives as ;go: directives.
+// Comments other than directives are not kept.
+func GoToLisp(filename string, src io.Reader) ([]byte, error) {
+	var dirs []lispDirective
+	pragh := func(pos Pos, blank bool, text string, current Pragma) Pragma {
+		if text != "" {
+			dirs = append(dirs, lispDirective{pos, blank, text})
+		}
+		return current
+	}
+	f, err := Parse(NewFileBase(filename), src, nil, pragh, 0)
+	if err != nil {
+		return nil, err
+	}
+	var b strings.Builder
+	if err := lispPrint(&b, f, dirs); err != nil {
+		return nil, err
+	}
+	return []byte(b.String()), nil
+}

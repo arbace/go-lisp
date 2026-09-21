@@ -268,6 +268,17 @@ writing `SPEC.md`:
    package).
 6. Tooling: `go2lisp`/`lisp2go` commands, error messages, maybe an editor mode.
 
+## Status (2026-09-21)
+
+| Roadmap step | State |
+|---|---|
+| 1. Reader | done: `syntax/lisp_reader.go`, fuzzed |
+| 2. Printer (Go → go-lisp) | done: `syntax/lisp_printer.go`, `syntax.GoToLisp`; prints every valid Go file in `$GOROOT` |
+| 3. Parser (go-lisp → AST) | done: `syntax/lisp_parser.go`, `syntax.ParseLisp`. The round trip is exact for all 11,588 valid Go files in `$GOROOT/src` and `$GOROOT/test`, and fuzzed. |
+| 4. Compiler hook | done: one line in `noder/noder.go` (`syntax.ParserFor`). `go tool compile` accepts `.lgo` files. 966 `$GOROOT/test` run programs converted to go-lisp behave identically to the Go originals (`go test cmd/compile/internal/syntax -run TestLispRunCorpus -lisprun`). 15 programs that inspect their own line numbers are excluded (F12). |
+| 5. `go build` support | not started |
+| 6. Tooling (`go2lisp`/`lisp2go` commands, diagnostics with go-lisp names, lisp2go parenthesization F9) | not started |
+
 ## Decided
 
 - **D1 (2026-09-21): keyword heads.** Forms without a Go keyword use EDN

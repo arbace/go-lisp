@@ -45,6 +45,14 @@ The goal is painless merges from upstream golang/go.
 - The bootstrap toolchain is the system `go` (1.27). Build this tree with
   `cd src && ./make.bash`. Afterwards, use `bin/go` from the repo root, not
   the system `go`, to test compiler packages.
-- Fast loop: `bin/go test cmd/compile/internal/syntax -run Lisp`.
+- Fast loop: `bin/go test -short cmd/compile/internal/syntax -run Lisp`.
+  Without `-short`, the corpus tests print and round-trip all of `$GOROOT`
+  (about 1 minute).
+- Behavioral test (slow, about 5 minutes):
+  `bin/go test cmd/compile/internal/syntax -run TestLispRunCorpus -lisprun`.
+- Print any Go file as go-lisp:
+  `bin/go test cmd/compile/internal/syntax -run TestLispPrintFile -lispsrc FILE.go`.
+- Compile a go-lisp file: `bin/go tool compile -p main -importcfg CFG -o x.o x.lgo`.
+  The only upstream hook is in `noder/noder.go` (`git grep 'go-lisp:'`).
 - After changing the compiler, rebuild the toolchain with
   `bin/go install cmd/compile`, or rerun `make.bash`.

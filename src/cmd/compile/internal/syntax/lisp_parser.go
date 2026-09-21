@@ -1510,3 +1510,15 @@ func (p *lispParser) selectStmt(x *lispForm) Stmt {
 	s.Rbrace = lispEnd(x)
 	return s
 }
+
+// A ParseFunc parses a source file; Parse and ParseLisp are ParseFuncs.
+type ParseFunc func(base *PosBase, src io.Reader, errh ErrorHandler, pragh PragmaHandler, mode Mode) (*File, error)
+
+// ParserFor returns the parser for the named file:
+// ParseLisp for go-lisp files, and Parse otherwise.
+func ParserFor(filename string) ParseFunc {
+	if IsLispFile(filename) {
+		return ParseLisp
+	}
+	return Parse
+}
