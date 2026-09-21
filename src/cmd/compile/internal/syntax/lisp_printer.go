@@ -687,6 +687,11 @@ func (p *lispPrinter) stmt(s Stmt) {
 
 	case *DeclStmt:
 		list := s.DeclList
+		if len(list) == 0 {
+			// An empty group (var () in Go); the syntax tree does not
+			// record the keyword, and any keyword gives the same tree.
+			p.print("(var)")
+		}
 		for i := 0; len(list) > 0; i++ {
 			if i > 0 {
 				p.nl()
@@ -769,12 +774,9 @@ func (p *lispPrinter) assign(s *AssignStmt) {
 	}
 
 	lhs := lispUnpackList(s.Lhs)
-	lhsExpr := func(x Expr) {
-		if n, ok := x.(*Name); ok && s.Op == Def {
-			p.print(p.decl(n))
-			return
-		}
-		p.expr(x)
+	lhsExpr := p.expr
+	if s.Op == Def {
+		lhsExpr = p.defLhs
 	}
 	if len(lhs) == 1 {
 		lhsExpr(lhs[0])
@@ -790,6 +792,24 @@ func (p *lispPrinter) assign(s *AssignStmt) {
 	}
 	p.exprList(lispUnpackList(s.Rhs))
 	p.print(")")
+}
+
+// defLhs prints an operand on the left side of :=; names are declared.
+func (p *lispPrinter) defLhs(x Expr) {
+	if n, ok := x.(*Name); ok {
+		p.print(p.decl(n))
+		return
+	}
+	p.expr(x)
+}
+
+func lispAllNames(list []Expr) bool {
+	for _, x := range list {
+		if _, ok := x.(*Name); !ok {
+			return false
+		}
+	}
+	return true
 }
 
 // initStmt prints an init statement in a one-element vector.
@@ -845,26 +865,33 @@ func (p *lispPrinter) forHeader(s *ForStmt) {
 			p.print("[(range ")
 			p.expr(r.X)
 			p.print(")]")
-		case r.Def:
+		case r.Def && lispAllNames(lispUnpackList(r.Lhs)):
 			// short form: [k v (range x)] means k, v := range x (D15)
 			p.print("[")
 			for _, x := range lispUnpackList(r.Lhs) {
-				n, ok := x.(*Name)
-				if !ok {
-					p.errorf(x, "non-name on left side of :=")
-				}
-				p.print(p.decl(n), " ")
+				p.print(p.decl(x.(*Name)), " ")
 			}
 			p.print("(range ")
 			p.expr(r.X)
 			p.print(")]")
 		default:
-			p.print("[(= ")
+			// long form; also used for := with non-names on the left,
+			// which the Go parser accepts (types2 reports them)
+			op, lhsExpr := "=", p.expr
+			if r.Def {
+				op, lhsExpr = ":=", p.defLhs
+			}
+			p.print("[(", op, " ")
 			if lhs := lispUnpackList(r.Lhs); len(lhs) == 1 {
-				p.expr(lhs[0])
+				lhsExpr(lhs[0])
 			} else {
 				p.print("[")
-				p.exprList(lhs)
+				for i, x := range lhs {
+					if i > 0 {
+						p.print(" ")
+					}
+					lhsExpr(x)
+				}
 				p.print("]")
 			}
 			p.print(" (range ")
