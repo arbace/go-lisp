@@ -84,17 +84,21 @@ symbols are selectors.
   (return (* r.W r.H)))
 
 ;; generics: type-parameter vector, then params, then results
-(func Map [T any, U any] [xs (:slice T), f (func [T] [U])] [(:slice U)]
-  (:= out (make (:slice U) 0 (len xs)))
+(func Map [T any, U any] [xs (:slice-of T), f (func [T] [U])] [(:slice-of U)]
+  (:= out (make (:slice-of U) 0 (len xs)))
   (for [_ x (range xs)]
     (= out (append out (f x))))
   (return out))
 
 (func main [] []
   (:= r (:lit Rect {W 3 H 4}))   ; Rect{W: 3, H: 4}
+  (var n int = 0)
   (if [(:= [v ok] (lookup r))] ok
     (fmt.Println v)
-    (else (panic "no")))
+    (else if (> n 0)
+      (return))
+    (else
+      (panic "no")))
   (defer (fmt.Println "bye"))
   (go (work &r))
   (switch x
@@ -110,7 +114,7 @@ symbols are selectors.
 | `f(a, b)` | `(f a b)` | |
 | `f(xs...)` | `(f & xs)` or `(f (... xs))` | D6 |
 | `a[i]` | `(:index a i)` | |
-| `a[lo:hi:max]` | `(:slice a lo hi max)`? | D10: clashes with the slice type |
+| `a[lo:hi:max]`, `a[:n]` | `(:slice a lo hi max)`, `(:slice a _ n)` | `_` marks an omitted bound |
 | `F[int, string]` (instantiation) | `(:index F int string)` | Go parses this as `IndexExpr` too |
 | `x.(T)` | `(:assert x T)` | |
 | `T(x)` conversion | `(T x)` / `((* T) x)` | just a call, same as in Go |
@@ -120,43 +124,31 @@ symbols are selectors.
 | `<-ch` / `ch <- v` | `(<- ch)` / `(<- ch v)` | 1 arg receives, 2 args send |
 | `x := e` / `a, b := f()` | `(:= x e)` / `(:= [a b] (f))` | |
 | `x = e`, `x += e`, `i++` | `(= x e)`, `(+= x e)`, `(++ i)` | |
-| `var x T = e` | `(var x T e)`, `(var x T)`, `(var x _ e)`? | D4 |
-| `const ( A T = iota; B; C )` | `(const [A T iota] [B] [C])` | groups matter (iota, repeated values) |
-| `type A = B` | `(type A = B)` | alias |
-| `[]T`, `[N]T`, `[...]T` | `(:slice T)`?, `(:array N T)`, `(:array ... T)` | D10 |
+| `var x T = e` | `(var x T = e)`, `(var x T)`, `(var x = e)`, `(var [a b] = (f))` | `=` separates type and values, as in Go |
+| `const ( A T = iota; B; C )` | `(const (A T = iota) (B) (C))` | a group is a list of spec lists (iota, repeated values) |
+| `type A B`, `type A = B` | `(type A B)`, `(type A = B)`, group `(type (A B) (C = D))` | |
+| `[]T`, `[N]T`, `[...]T` | `(:slice-of T)`, `(:array-of N T)`, `(:array-of ... T)` | |
 | `map[K]V`, `chan T`, `<-chan T`, `chan<- T` | `(map K V)`, `(chan T)`, `(<-chan T)`, `(chan<- T)` | `map` and `chan` are Go keywords, so no collisions |
 | `func(int) error` | `(func [int] [error])` | type: params without names |
 | `func(x int) int { ... }` | `(func [x int] [int] ...)` | func literal = func with no name |
 | `T{...}` | `(:lit T ...)` | D5: elided inner types as `[..]`, keyed items as `{k v}` |
-| `if init; c {} else {}` | `(if [init] c then... (else ...))` | D3 |
+| `if init; c {} else if d {} else {}` | `(if [init] c stmts... (else if d stmts...) (else stmts...))` | else-ifs are a flat chain of trailing forms |
 | `for i := 0; i < n; i++ {}` | `(for [(:= i 0) (< i n) (++ i)] ...)` | |
 | `for c {}` / `for {}` | `(for [c] ...)` / `(for [] ...)` | |
 | `for k, v := range xs {}` | `(for [k v (range xs)] ...)`; `(for [k v (= range xs)] ...)`? | `=` vs `:=` range |
 | `switch` / type switch / `select` | `(switch ...)` / `(switch [v (type x)] ...)` / `(select (case (<- ch v) ...))` | |
 | `L: for ...`, `break L`, `goto L` | `(:label L (for ...))`, `(break L)`, `(goto L)` | |
-| `//go:noinline` | `;go:noinline` (same rule as Go comments) or `^{:go/noinline true}` | D7 |
+| `//go:noinline`, `//go:build ...` | `;go:noinline`, `;go:build ...` | a `;go:` line comment at column 1 is a directive |
 | literals | EDN strings, `\a` chars, numbers; Go-only number formats `0x1p-2`, `1_000`, `3i`, `0o17` | D2 |
 
 ## 5. Open decisions
 
-- **D3: statement shape of `if`/`else`.** Should `(if c then else)` behave
-  like Clojure, with `(do ...)` for blocks? Or should the form be Go-shaped?
-  Where does the `init` go?
-- **D4: optional types in `var`/`const`, grouped names.** `var a, b int`
-  versus `var a, b = 1, 2`. Positional forms become ambiguous here. Keyword
-  markers could fix it, for example `(var [a b] :- int := [1 2])`.
 - **D5: composite literals.** The head is decided: `(:lit T ...)`. Still
   open: how elements are written (a vector for an inner literal with its type
   omitted, a map for keyed elements?), and whether evaluation order is kept.
 - **D6: variadics.** Clojure's `&` in params and calls, or `(... T)`?
-- **D7: pragmas and build constraints.** `go/build` reads `//go:build` from
-  the file header, so the header format is fixed early.
 - **D8: file extension** (`.lgo`, `.gol`, `.golisp`, `.edn`?). The scope
   part is decided (see below).
-- **D10: slice type vs slice expression.** Both want the name `:slice`.
-  Candidates: `(:slice T)` for the type with `(:slice-expr a lo hi)`, or
-  `(:slice-of T)` for the type with `(:slice a lo hi)`.
-
 
 ## 6. Roadmap
 
@@ -190,3 +182,18 @@ symbols are selectors.
 - **Scope (2026-09-21):** milestone 1 is the compiler (`go tool compile`
   accepts Lisp files) plus the round-trip test over `$GOROOT/src` and
   `$GOROOT/test`. `go build` support comes later.
+- **D3 (2026-09-21): if/else follows Go's shape.** `(if [init]? cond stmts...
+  (else if cond2 stmts...)* (else stmts...)?)`. Statements go directly in
+  the body, with no implicit block form. The else-if chain is flat. `else`
+  is a Go keyword, so a trailing `(else ...)` can't be mistaken for a call.
+- **D4 (2026-09-21): `=` marker in declarations.** `(var names type? = values...)`,
+  where names is a symbol or a vector of symbols. The same shape works for
+  `const`, and `(type Name T)` / `(type Name = T)` for types. A group is a
+  form whose arguments are all lists: `(const (A T = iota) (B) (C))`. A group
+  with a single spec may print as a plain decl. That changes no semantics.
+- **D7 (2026-09-21): directives are `;go:` comments.** They mirror Go's
+  `//go:` rule (column 1, no space). The text goes to `syntax.PragmaHandler`
+  unchanged, and `;go:build` at the top of the file mirrors `//go:build`.
+- **D10 (2026-09-21): slices.** The types are `(:slice-of T)`,
+  `(:array-of N T)` and `(:array-of ... T)`. The expression is
+  `(:slice a lo hi max?)`, with `_` for an omitted bound.
