@@ -1,6 +1,6 @@
 # go-lisp: design notes (living document)
 
-Status: **draft v1**. The syntax is not settled. Every decision below that is
+Status: **draft v2**. The syntax is not settled. Every decision below that is
 still open has an ID (D1, D2, ...) so we can talk about it and update it.
 Settled decisions move to the "Decided" log at the bottom.
 
@@ -56,7 +56,7 @@ foo.go ──┴─ syntax.Parse ──────┴──> *syntax.File ─�
   gopls, vet, cgo and `go/types` stay Go-only. Until they support Lisp,
   tools can run on the converted `.go` output.
 
-## 4. Syntax sketch (v1)
+## 4. Syntax sketch (v2)
 
 Conventions (decided): Go keywords and operators head special forms (D9).
 Forms without a Go keyword use keyword heads (D1). Dotted symbols are
@@ -78,9 +78,19 @@ selectors. Directives are `;go:` comments (D7).
 
 (type Rect
   (struct
-    [W H float64]                 ; struct fields: see D13
+    [W H float64]                 ; field group: names... Type "tag"?
     [Name string "json:\"name\""]
-    [io.Reader]))                 ; embedded field
+    [io.Reader]                   ; embedded field
+    [(* Base) "tag"]))            ; embedded pointer with tag
+
+(type List [T any]               ; generic type: type params after the name
+  (struct [head (* (:index node T))]))
+
+(type Number
+  (interface
+    (| (~ int) (~ float64))       ; union / approximation elements
+    fmt.Stringer                  ; embedded interface
+    (String [] [string])))        ; method
 
 (const
   (Sunday Weekday = iota)
@@ -88,7 +98,7 @@ selectors. Directives are `;go:` comments (D7).
   (Tuesday))
 
 ;; method: the receiver pair comes before the name, as in Go
-(func [r *Rect] Area [] [float64]
+(func [r (* Rect)] Area [] [float64]
   (return (* r.W r.H)))
 
 ;; generics: three vectors after the name = type params, params, results
@@ -117,10 +127,19 @@ selectors. Directives are `;go:` comments (D7).
   (for [i p (range ps)]
     (fmt.Println i p))
   (defer (fmt.Println "bye"))
-  (go (work &r))
+  (go (work (& r)))
   (switch n
-    (case [1 2] (fmt.Println "small"))
-    (default (fmt.Println "big"))))
+    (case [1 2] (fmt.Println "small") (fallthrough))
+    (default (fmt.Println "big")))
+  (:type-switch [v x]
+    (case [int string] (use v))
+    (case [nil] (none)))
+  (select
+    (case (<- out v) (sent))
+    (case (:= [y ok] (<- in)) (got y ok))
+    (default (idle)))
+  (:= re (regexp.MustCompile `\d+\.go`))   ; raw string
+  (if (== c '\n') (++ lines)))
 ```
 
 ### 4.1 Mapping table
@@ -128,14 +147,14 @@ selectors. Directives are `;go:` comments (D7).
 | Go | Lisp | Status |
 |---|---|---|
 | `x.f`, `pkg.F`, `a.b.c` | `x.f`, `pkg.F`, `a.b.c` | dotted symbol -> `SelectorExpr` chain |
-| `f().X` (selector on a non-name) | ? | D12 |
+| `f().X`, `(*p).X.Y` | `(:sel (f) X)`, `(:sel (* p) X.Y)` | D12 |
 | `f(a, b)` | `(f a b)` | |
 | `f(xs...)` | `(f xs ...)` | D6 |
 | `a[i]`, `F[int, string]` | `(:index a i)`, `(:index F int string)` | both are `IndexExpr` |
 | `a[lo:hi:max]`, `a[:n]` | `(:slice a lo hi max)`, `(:slice a _ n)` | D10 |
 | `x.(T)` | `(:assert x T)` | |
 | `T(x)` conversion | `(T x)`, `((* T) x)` | an ordinary call, as in Go |
-| `*p`, `&x` | `(* p)`, `(& x)`; sugar `*p`, `&x`? | D14 |
+| `*p`, `&x`, `&T{}` | `(* p)`, `(& x)`, `(& (:lit T))` | D14: no shorthand |
 | `a + b + c`, `-x`, `!b` | `(+ a b c)`, `(- x)`, `(! b)` | n-ary ops fold to the left |
 | `a == b` | `(== a b)` | Go spelling |
 | `<-ch`, `ch <- v` | `(<- ch)`, `(<- ch v)` | 1 arg receives, 2 args send |
@@ -144,7 +163,9 @@ selectors. Directives are `;go:` comments (D7).
 | `var`/`const` | `(var x T = e)`, `(var x T)`, `(var x = e)`, `(var [a b] = (f))` | D4 |
 | groups | `(const (A T = iota) (B) (C))` | D4: all arguments are lists |
 | `type A B`, `type A = B` | `(type A B)`, `(type A = B)`, `(type (A B) (C = D))` | D4 |
-| generic type decl `type L[T any] ...` | `(type L [T any] ...)`? | D13 |
+| generic type decl `type L[T any] ...` | `(type L [T any] (struct ...))` | D13 |
+| struct fields | `[a b T]`, `[f T "tag"]`, `[io.Reader]`, `[(* B) "tag"]` | D13 |
+| interface elements | `(M [params] [results])`, `io.Reader`, `(| (~ int) string)` | D13 |
 | `[]T`, `[N]T`, `[...]T` | `(:slice-of T)`, `(:array-of N T)`, `(:array-of ... T)` | D10 |
 | `map[K]V`, `chan T`, `<-chan T`, `chan<- T` | `(map K V)`, `(chan T)`, `(<-chan T)`, `(chan<- T)` | |
 | `*T` | `(* T)` | D14 |
@@ -154,39 +175,32 @@ selectors. Directives are `;go:` comments (D7).
 | `...T` param | `(... T)` | D6 |
 | `T{...}` | `(:lit T elem...)`; `(:kv k v)`; elided type: `(:lit _ ...)` | D5 |
 | `if` | `(if [init]? c stmts... (else if d stmts...)* (else stmts...)?)` | D3 |
-| `for i := 0; i < n; i++ {}` | `(for [(:= i 0) (< i n) (++ i)] ...)` | D15 |
+| `for i := 0; i < n; i++ {}` | `(for [(:= i 0) (< i n) (++ i)] ...)`; `_` = omitted part | D15 |
 | `for c {}` / `for {}` | `(for [c] ...)` / `(for [] ...)` | D15 |
-| `for k, v := range xs {}` | `(for [k v (range xs)] ...)` | D15: `=` form of range |
-| `switch` / type switch / `select` | `(switch [init]? tag (case [..] ...) (default ...))` | D16 |
+| `for k, v := range xs {}` | `(for [k v (range xs)] ...)` | D15 |
+| `for k, v = range xs {}`, `for range ch {}` | `(for [(= [k v] (range xs))] ...)`, `(for [(range ch)] ...)` | D15 |
+| `switch init; tag {...}` | `(switch [init]? tag? (case [v...] stmts...) (default stmts...))` | D16 |
+| `switch init; v := x.(type) {...}` | `(:type-switch [init]? [v x] (case [T...] ...) ...)`; `[x]` without a binding | D16 |
+| `select {...}` | `(select (case (<- ch v) ...) (case (:= [x ok] (<- ch)) ...) (default ...))` | D16 |
+| `fallthrough` | `(fallthrough)` | |
 | `L: ...`, `break L`, `goto L` | `(:label L stmt)`, `(break L)`, `(goto L)` | |
 | `{ ... }` block statement | `(:block stmts...)` | |
 | `go f()`, `defer f()`, `return a, b` | `(go (f))`, `(defer (f))`, `(return a b)` | |
 | `//go:noinline` | `;go:noinline` | D7 |
-| literals | EDN strings, `\a` chars, numbers + Go number formats, raw strings `#go/raw "..."`? | D2, D17 |
+| literals | `".."` with Go escapes, `` `raw` ``, runes `'a'` `'\n'`, Go number formats | D2, D17 |
 
 ## 5. Open decisions
 
-- **D12: selector on a non-name expression** (`f().X`, `a[i].X`, `(*p).X`).
-  Options are `(:sel (f) X)`, `(. (f) X)`, or the Clojure-style `(.X (f))`.
-  The name `.X` can't be a Go identifier.
-- **D13: struct fields and generic type decls.** Should struct fields stay as
-  group vectors `[W H float64]` / `[Name string "tag"]` / `[io.Reader]`? They
-  hold tags and embedded fields, which don't fit flat pairs. Where do type
-  params go in `(type List [T any] (struct ...))`, and in interface elements
-  such as unions `(| (~ int) string)`?
-- **D14: pointer/address sugar.** `*T`, `*p` and `&x` as reader sugar for
-  `(* T)`, `(* p)` and `(& x)` on symbols? A symbol starting with `*` or `&`
-  can't be a Go identifier.
-- **D15: `for` shape details.** The header vector: 3 elements = classic
-  loop, 1 = condition, 0 = infinite, a trailing `(range ...)` = range loop.
-  How do we write the `=` (assign, not define) range form and a range with
-  no variables?
-- **D16: switch/select details.** The type switch
-  (`switch v := x.(type)`), the `select` cases (send, receive with `:=` or
-  `=`), and case-list vectors.
-- **D17: string lexemes.** How are raw strings (`#go/raw "..."`?) written,
-  and which rune escape syntax do we use (`\a`, `é`, `\newline`, Go's
-  `'\x00'`)?
+None of the syntax-level decisions are open. Smaller points to confirm while
+writing `SPEC.md`:
+
+- `select` cases hold a single communication form (`(<- ch v)`,
+  `(:= [x ok] (<- ch))`, `(= x (<- ch))`, `(<- ch)`), with no vector.
+- Imports: `(import "p" [name "p"] ...)`. One path = single decl, several =
+  group.
+- Lossless round-trip normalizations: expanded field groups (D11),
+  single-spec groups (D4), and raw vs interpreted strings (compared by
+  value).
 
 ## 6. Roadmap
 
@@ -211,8 +225,8 @@ selectors. Directives are `;go:` comments (D7).
   identifier stays expressible without escapes.
 - **D2 (2026-09-21): EDN plus minimal Go lexemes.** Strict EDN (lists,
   vectors, maps, sets, `#_`, `#tag`), extended only with what Go literals need:
-  raw strings (for example `#go/raw "..."`), hex floats, `_` digit
-  separators, imaginary literals, `0o`/`0b` prefixes, and rune characters.
+  raw strings, hex floats, `_` digit separators, imaginary literals,
+  `0o`/`0b` prefixes, and rune literals (see D17 for the exact forms).
   No `^`, `@`, `'` or `#"..."`.
 - **D9 (2026-09-21): Go vocabulary, Lisp shape.** Heads are Go keywords and
   operators (`func`, `var`, `for`, `range`, `:=`, `==`). No Clojure aliases
@@ -248,3 +262,26 @@ selectors. Directives are `;go:` comments (D7).
   named* result `int` of type `error`, which is valid Go. Go's grouping
   (`a, b int`) is not kept, so the round-trip test compares field lists
   after expanding groups.
+- **D12 (2026-09-21): `(:sel expr X)`** selects on a non-name expression.
+  A dotted tail chains: `(:sel (f) X.Y)`.
+- **D13 (2026-09-21): struct field groups are vectors**, `[names... Type "tag"?]`.
+  A group with no name is an embedded field: `[io.Reader]`,
+  `[(* Base) "tag"]`. A trailing string is always a tag, and a list or dotted
+  symbol can't be a name, so nothing is ambiguous. Generic types are
+  `(type Name [T any] Type)`. Interface elements are method lists
+  `(M [params] [results])`, embedded types, and `(| (~ int) string)` unions.
+- **D14 (2026-09-21): no `*`/`&` shorthand.** Always `(* x)` / `(& x)`. With
+  one argument, `*` is deref or a pointer type. With two or more, it's
+  multiplication.
+- **D15 (2026-09-21): for.** Header vector: `[init cond post]` (`_` =
+  omitted), `[cond]`, `[]`. Range: the short form `[k v (range xs)]` means
+  `:=`. The Go-shaped `[(= [k v] (range xs))]` and `[(range xs)]` cover the
+  rest. `range` is a Go keyword, so none of these is ambiguous.
+- **D16 (2026-09-21): switch.** Case values always go in a vector. The type
+  switch has its own form, `(:type-switch [init]? [v x] clauses...)`
+  (`[x]` when there's no binding). `select` cases hold one communication form.
+- **D17 (2026-09-21): string and rune lexemes.** `"..."` accepts Go's full
+  escape set (`\a \v \x41 \101 \u \U`). Go backtick raw strings are
+  allowed. Runes are Go literals: `'a'`, `'\n'`, `'\x07'`, `'\U0001F600'`.
+  This departs from EDN on purpose: there are no EDN `\c` chars, and D2
+  left `'` unused.
