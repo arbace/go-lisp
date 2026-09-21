@@ -1,0 +1,38 @@
+# Coverage of go-lisp (.lgo) files is reported in go-lisp positions.
+
+go test -cover ./sign
+stdout 'coverage: 80.0% of statements' # the same as for the equivalent Go code
+
+go test -coverprofile=c.out ./sign
+grep '^example.com/cov/sign/sign.lgo:4\.3,5\.5 1 1$' c.out
+grep '^example.com/cov/sign/sign.lgo:5\.5,5\.25 1 0$' c.out
+grep '^example.com/cov/sign/sign.lgo:6\.3,' c.out
+! grep 'sign_test' c.out
+
+go tool cover -func=c.out
+stdout 'sign.lgo:3:\s+Classify\s+80.0%'
+
+go tool cover -html=c.out -o c.html
+grep 'sign.lgo' c.html
+
+-- go.mod --
+module example.com/cov
+
+go 1.28
+-- sign/sign.lgo --
+(package sign)
+
+(func classify [-n int] [string]
+  (if (< -n 0)
+    (return "negative"))
+  (if (== -n 0)
+    (return "zero"))
+  (return "positive"))
+-- sign/sign_test.lgo --
+(package sign)
+
+(import "testing")
+
+(func test-classify [-t (* testing.T)] []
+  (if (!= (classify 0) "zero") (-t.error "0"))
+  (if (!= (classify 1) "positive") (-t.error "1")))

@@ -9,6 +9,8 @@
 package syntax
 
 import (
+	"bytes"
+	"fmt"
 	"io"
 	"reflect"
 	"sort"
@@ -440,4 +442,166 @@ func lispRewriteExprs(v reflect.Value, f func(Expr) Expr) {
 			lispRewriteExprs(v.Index(i), f)
 		}
 	}
+}
+
+// LispToGoLines is like LispToGo, but the Go source it returns has
+// /*line*/ directives that map declarations, statements, clauses,
+// function literals, and closing braces back to their positions in the
+// go-lisp source src (named filename). Tools that read Go, such as the
+// coverage tool, can then report positions in the go-lisp file.
+func LispToGoLines(filename string, src io.Reader) ([]byte, error) {
+	var dirs []lispDirective
+	pragh := func(pos Pos, blank bool, text string, current Pragma) Pragma {
+		if text != "" {
+			dirs = append(dirs, lispDirective{pos, blank, text})
+		}
+		return current
+	}
+	data, err := io.ReadAll(src)
+	if err != nil {
+		return nil, err
+	}
+	fl, err := ParseLisp(NewFileBase(filename), bytes.NewReader(data), nil, pragh, 0)
+	if err != nil {
+		return nil, err
+	}
+	LispParenthesize(fl)
+	out, err := lispWriteGo(fl, dirs)
+	if err != nil {
+		return nil, err
+	}
+	fg, err := Parse(NewFileBase(filename+".go"), bytes.NewReader(out), nil, nil, 0)
+	if err != nil {
+		return nil, fmt.Errorf("go-lisp to Go: generated Go does not parse: %v", err)
+	}
+
+	// Pair up the positions of corresponding nodes of the two trees.
+	var marks []lispMark
+	lispPairPositions(reflect.ValueOf(fl), reflect.ValueOf(fg), &marks)
+
+	goOffset := lispOffsetFunc(out)
+	lispOffset := lispOffsetFunc(data)
+	offset := func(pos Pos) int { return goOffset(pos.Line(), pos.Col()) }
+	sort.SliceStable(marks, func(i, j int) bool { return offset(marks[i].goPos) < offset(marks[j].goPos) })
+
+	var b bytes.Buffer
+	last := -1
+	for _, m := range marks {
+		off := offset(m.goPos)
+		if off <= last || off > len(out) || !m.lispPos.IsKnown() {
+			continue // at most one directive per position
+		}
+		// Point at a form's '(' rather than at its head symbol.
+		line, col := m.lispPos.RelLine(), m.lispPos.RelCol()
+		if lo := lispOffset(m.lispPos.Line(), m.lispPos.Col()); lo > 0 && lo <= len(data) && data[lo-1] == '(' && col > 1 {
+			col--
+		}
+		b.Write(out[max(last, 0):off])
+		fmt.Fprintf(&b, "/*line %s:%d:%d*/", filename, line, col)
+		last = off
+	}
+	if last < 0 {
+		last = 0
+	}
+	b.Write(out[last:])
+	return b.Bytes(), nil
+}
+
+// lispOffsetFunc returns a function that maps a line and column
+// of src to a byte offset, or -1.
+func lispOffsetFunc(src []byte) func(line, col uint) int {
+	lineStart := []int{0}
+	for i, c := range src {
+		if c == '\n' {
+			lineStart = append(lineStart, i+1)
+		}
+	}
+	return func(line, col uint) int {
+		if line < 1 || int(line) > len(lineStart) || col < 1 {
+			return -1
+		}
+		return lineStart[line-1] + int(col) - 1
+	}
+}
+
+// A lispMark pairs the position of a node in generated Go source with the
+// position of the corresponding node in go-lisp source.
+type lispMark struct {
+	goPos, lispPos Pos
+}
+
+// lispPairPositions walks the go-lisp tree l and the tree g of the Go
+// source generated from it in lockstep and records the positions of
+// corresponding declarations, statements, clauses, function literals,
+// and closing braces. The trees have the same shape; where they do not
+// (which would be a bug), the walk stops for that subtree.
+func lispPairPositions(l, g reflect.Value, marks *[]lispMark) {
+	if l.Kind() != g.Kind() {
+		return
+	}
+	switch l.Kind() {
+	case reflect.Interface, reflect.Pointer:
+		if l.IsNil() || g.IsNil() {
+			return
+		}
+		if l.Kind() == reflect.Interface && l.Elem().Type() != g.Elem().Type() {
+			return
+		}
+		if ln, ok := l.Interface().(Node); ok && l.Kind() == reflect.Pointer {
+			gn := g.Interface().(Node)
+			switch ln := ln.(type) {
+			case *FuncDecl:
+				// The func keyword, where the coverage tool takes a
+				// function's position from: the generated Go starts
+				// function declarations at the beginning of a line.
+				p := gn.Pos()
+				*marks = append(*marks, lispMark{MakePos(p.Base(), p.Line(), colbase), ln.Pos()})
+			case *FuncLit:
+				*marks = append(*marks, lispMark{gn.Pos(), ln.Pos()})
+			case Stmt, *CaseClause, *CommClause:
+				*marks = append(*marks, lispMark{StartPos(gn), ln.Pos()})
+			}
+			switch ln := ln.(type) {
+			case *BlockStmt:
+				*marks = append(*marks, lispMark{gn.(*BlockStmt).Rbrace, ln.Rbrace})
+			case *SwitchStmt:
+				*marks = append(*marks, lispMark{gn.(*SwitchStmt).Rbrace, ln.Rbrace})
+			case *SelectStmt:
+				*marks = append(*marks, lispMark{gn.(*SelectStmt).Rbrace, ln.Rbrace})
+			}
+		}
+		lispPairPositions(l.Elem(), g.Elem(), marks)
+	case reflect.Struct:
+		for i := range l.NumField() {
+			if l.Type().Field(i).IsExported() {
+				lispPairPositions(l.Field(i), g.Field(i), marks)
+			}
+		}
+	case reflect.Slice:
+		ls, gs := lispSliceNodes(l), lispSliceNodes(g)
+		if len(ls) != len(gs) {
+			return
+		}
+		for i := range ls {
+			lispPairPositions(ls[i], gs[i], marks)
+		}
+	case reflect.Array:
+		for i := range l.Len() {
+			lispPairPositions(l.Index(i), g.Index(i), marks)
+		}
+	}
+}
+
+// lispSliceNodes returns the elements of a slice value, without the empty
+// statements in statement lists, which Go's printer prints as nothing.
+func lispSliceNodes(v reflect.Value) []reflect.Value {
+	var list []reflect.Value
+	for i := range v.Len() {
+		e := v.Index(i)
+		if _, ok := e.Interface().(*EmptyStmt); ok {
+			continue
+		}
+		list = append(list, e)
+	}
+	return list
 }

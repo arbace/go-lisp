@@ -283,8 +283,15 @@ writing `SPEC.md`:
 
 - **Vet:** `go vet` and the vet step of `go test` skip packages that have
   `.lgo` files, because vet reads Go syntax only.
-- **Other Go-syntax tools** don't read `.lgo` files: `go fmt`, `-cover`,
-  cgo, gopls, and other `go/ast`-based tools.
+- **Other Go-syntax tools** don't read `.lgo` files: `go fmt`, cgo, gopls,
+  and other `go/ast`-based tools.
+- **Coverage** works: `go test -cover`, `-coverprofile`, and `go tool
+  cover -func/-html` report positions in the `.lgo` source. The compiler
+  converts go-lisp files for `cmd/cover` (`go tool compile -lisp2go`, Go
+  with `/*line*/` directives), and `cmd/cover` honors those directives for
+  such files. Block starts are exact. The end of the last simple statement
+  in a block is approximate (it has the length of the Go statement).
+  `-func` shows Go names.
 - **Examples:** go-lisp examples compile but aren't run, because there are
   no `// Output:` comments.
 - **Module cache:** packages with `.lgo` files in module-cache modules

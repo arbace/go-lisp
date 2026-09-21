@@ -85,6 +85,7 @@ func Main(archInit func(*ssagen.ArchInfo)) {
 
 	base.DebugSSA = ssacompile.PhaseOption
 	base.ParseFlags()
+	noder.Lisp2Go() // go-lisp: -lisp2go
 
 	if flagGCStart := base.Debug.GCStart; flagGCStart > 0 || // explicit flags overrides environment variable disable of GC boost
 		os.Getenv("GOGC") == "" && os.Getenv("GOMEMLIMIT") == "" && base.Flag.LowerC != 1 { // explicit GC knobs or no concurrency implies default heap

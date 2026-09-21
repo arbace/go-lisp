@@ -93,7 +93,7 @@ func funcOutput(profile, outputFile string) error {
 // findFuncs parses the file and returns a slice of FuncExtent descriptors.
 func findFuncs(name string) ([]*FuncExtent, error) {
 	fset := token.NewFileSet()
-	parsedFile, err := parser.ParseFile(fset, name, nil, parser.SkipObjectResolution)
+	parsedFile, err := parser.ParseFile(fset, name, lispSource(name), parser.SkipObjectResolution) // go-lisp: .lgo files
 	if err != nil {
 		return nil, err
 	}

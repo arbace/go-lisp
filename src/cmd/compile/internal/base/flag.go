@@ -108,6 +108,7 @@ type CmdFlags struct {
 	InstallSuffix      string       "help:\"set pkg directory `suffix`\""
 	JSON               string       "help:\"version,file for JSON compiler/optimizer detail output\""
 	Lang               string       "help:\"Go language version source code expects\""
+	Lisp2Go            string       "flag:\"lisp2go\" help:\"write the go-lisp file argument as Go with line directives to `file`, and exit\"" // go-lisp: coverage
 	LinkObj            string       "help:\"write linker-specific object to `file`\""
 	LinkShared         *bool        "help:\"generate code that will be linked against Go shared libraries\"" // &Ctxt.Flag_linkshared, set below
 	Live               CountFlag    "help:\"debug liveness analysis\""

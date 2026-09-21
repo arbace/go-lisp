@@ -336,9 +336,11 @@ func lispRoundTripGo1(filename string, src []byte) (goSrc, diff string) {
 	if err != nil {
 		return "", fmt.Sprintf("GoToLisp: %v", err)
 	}
-	out, err := LispToGo(filename, bytes.NewReader(lisp))
+	// LispToGoLines is LispToGo plus /*line*/ directives, which must
+	// not change the generated Go.
+	out, err := LispToGoLines(filename, bytes.NewReader(lisp))
 	if err != nil {
-		return "", fmt.Sprintf("LispToGo: %v", err)
+		return "", fmt.Sprintf("LispToGoLines: %v", err)
 	}
 	f2, err := Parse(NewFileBase(filename), bytes.NewReader(out), nil, collect(&dirs2), 0)
 	if err != nil {

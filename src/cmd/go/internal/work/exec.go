@@ -533,6 +533,9 @@ func (b *Builder) runCover(ctx context.Context, a *Action) error {
 			sourceFile = filepath.Join(p.Dir, file)
 			coverFile = a.Objdir + file
 		}
+		if err := lispCoverSource(b, a, &sourceFile); err != nil { // go-lisp: .lgo files
+			return err
+		}
 		coverFile = strings.TrimSuffix(coverFile, ".go") + ".cover.go"
 		infiles = append(infiles, sourceFile)
 		outfiles = append(outfiles, coverFile)

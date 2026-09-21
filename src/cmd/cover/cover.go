@@ -352,7 +352,7 @@ func (f *File) codeRanges(start, end token.Pos) []Range {
 
 	// Close any open code range at the end.
 	if prevEndLine > 0 {
-		if prevEndLine < scanFile.LineCount() {
+		if prevEndLine < scanFile.LineCount() && !isLispGo(f.name) { // go-lisp: end go-lisp blocks at their mapped closing brace
 			// There are non-code lines after the last code line
 			// (e.g., a lone "}"). Close at the next line's start.
 			codeEnd := origFile.Pos(startOffset + scanFile.Offset(scanFile.LineStart(prevEndLine+1)))
@@ -676,7 +676,7 @@ func (f *File) postFunc(fn ast.Node, funcname string, flit bool, body *ast.Block
 	// more smoothly for "go tool cover -html". See also issue #56433
 	// for more details.
 	if pkgconfig.Local {
-		filename = f.name
+		filename = lispSourceName(f.name, fnpos) // go-lisp: the .lgo file for go-lisp files
 	}
 
 	// Hand off function to meta-data builder.
@@ -1139,7 +1139,7 @@ type block1 struct {
 
 // position returns the Position for pos, ignoring //line directives.
 func (f *File) position(pos token.Pos) token.Position {
-	return f.fset.PositionFor(pos, false)
+	return f.fset.PositionFor(pos, isLispGo(f.name)) // go-lisp: honor /*line*/ for go-lisp files
 }
 
 // offset translates a token position into a 0-indexed byte offset.
