@@ -344,3 +344,8 @@ writing `SPEC.md`:
   as written (`serve-HTTP`, `io.EOF`). Bare names have an exemption list:
   predeclared names, `main`, `init`, and import names. The mapping is lexical, in the parser, with no types2 changes.
   Full rules are in §4.2.
+- **Non-goal (2026-09-21): strict EDN / Clojure-reader compatibility.** The
+  syntax is EDN-*flavored* and read by our own reader. Tokens such as `^`,
+  `~`, `'x'` runes, backtick raw strings, Go string escapes and Go number
+  forms stay as decided (D2, D17), even though `clojure.edn` rejects or
+  misreads them.
