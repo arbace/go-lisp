@@ -1,6 +1,6 @@
 # go-lisp: design notes (living document)
 
-Status: **draft v3**. The syntax is not settled. Every decision below that is
+Status: **draft v4**. The syntax is not settled. Every decision below that is
 still open has an ID (D1, D2, ...) so we can talk about it and update it.
 Settled decisions move to the "Decided" log at the bottom.
 
@@ -39,17 +39,17 @@ written as s-expressions, in a Clojure/EDN flavor. The rest of the compiler
 
 ```
 foo.lgo ─┐
-         ├─ lispsyntax.Parse ──┐
+         ├─ syntax.ParseLisp ──┐
 foo.go ──┴─ syntax.Parse ──────┴──> *syntax.File ──> types2 ──> unified IR ──> ...
 ```
 
-- `src/cmd/compile/internal/lispsyntax/` (new package)
-  - `reader.go`: EDN reader. Text -> forms (list, vector, map, set, symbol,
+- New files in package `src/cmd/compile/internal/syntax/` (SPEC Q2), all named `lisp_*.go`
+  - `lisp_reader.go`: EDN reader. Text -> forms (list, vector, map, set, symbol,
     keyword, string, char, number), each form with line and column.
-  - `parser.go`: forms -> `syntax` nodes (`syntax.MakePos` for positions).
+  - `lisp_parser.go`: forms -> `syntax` nodes (`syntax.MakePos` for positions).
     Also calls `syntax.PragmaHandler` for directives (`go:noinline`, `go:embed`, ...).
-  - `printer.go`: `syntax` AST -> Lisp text (the `go2lisp` direction).
-  - `roundtrip_test.go`: runs the corpus test from §2.2.
+  - `lisp_printer.go`: `syntax` AST -> Lisp text (the `go2lisp` direction).
+  - `lisp_roundtrip_test.go`: runs the corpus test from §2.2.
 - Hook in `noder/noder.go`: choose the parser from the file extension.
 - A later phase makes `go build` understand the new files: `go/build`
   (extension, reading imports and build tags from the header) and `cmd/go`.
@@ -112,7 +112,7 @@ the Go names.
   (return out))
 
 (func -split [s string] [:_ string string]    ; func split(S string) (string, string)
-  (return (:slice s _ 1) (:slice s 1 _)))
+  (return (:slice s :_ 1) (:slice s 1 :_)))
 
 (func main [] []                               ; main: never mapped
   (:= r (:lit rect (:kv :w 3) (:kv :h 4)))     ; Rect{W: 3, H: 4}
@@ -202,7 +202,7 @@ bare names, which is always correct.
 | `f(a, b)` | `(f a b)` | |
 | `f(xs...)` | `(f xs ...)` | D6 |
 | `a[i]`, `F[int, string]` | `(:index a i)`, `(:index F int string)` | both are `IndexExpr` |
-| `a[lo:hi:max]`, `a[:n]` | `(:slice a lo hi max)`, `(:slice a _ n)` | D10 |
+| `a[lo:hi:max]`, `a[:n]` | `(:slice a lo hi max)`, `(:slice a :_ n)` | D10, Q1 |
 | `x.(T)` | `(:assert x T)` | |
 | `T(x)` conversion | `(T x)`, `((* T) x)` | an ordinary call, as in Go |
 | `*p`, `&x`, `&T{}` | `(* p)`, `(& x)`, `(& (:lit T))` | D14: no shorthand |
@@ -224,9 +224,9 @@ bare names, which is always correct.
 | `func(int, string) (n int, err error)` | `(func [:_ int string] [n int, err error])` | D11 |
 | `func(x int) int { ... }` | `(func [x int] [int] stmts...)` | func literal = func without a name |
 | `...T` param | `(... T)` | D6 |
-| `T{...}` | `(:lit T elem...)`; `(:kv :field v)` / `(:kv expr v)`; elided type: `(:lit _ ...)` | D5, D18 |
+| `T{...}` | `(:lit T elem...)`; `(:kv :field v)` / `(:kv expr v)`; elided type: `(:lit :_ ...)` | D5, D18, Q1 |
 | `if` | `(if [init]? c stmts... (else if d stmts...)* (else stmts...)?)` | D3 |
-| `for i := 0; i < n; i++ {}` | `(for [(:= i 0) (< i n) (++ i)] ...)`; `_` = omitted part | D15 |
+| `for i := 0; i < n; i++ {}` | `(for [(:= i 0) (< i n) (++ i)] ...)`; `:_` = omitted part | D15, Q1 |
 | `for c {}` / `for {}` | `(for [c] ...)` / `(for [] ...)` | D15 |
 | `for k, v := range xs {}` | `(for [k v (range xs)] ...)` | D15 |
 | `for k, v = range xs {}`, `for range ch {}` | `(for [(= [k v] (range xs))] ...)`, `(for [(range ch)] ...)` | D15 |
@@ -299,10 +299,11 @@ writing `SPEC.md`:
   unchanged, and `;go:build` at the top of the file mirrors `//go:build`.
 - **D10 (2026-09-21): slices.** The types are `(:slice-of T)`,
   `(:array-of N T)` and `(:array-of ... T)`. The expression is
-  `(:slice a lo hi max?)`, with `_` for an omitted bound.
+  `(:slice a lo hi max?)`, with `:_` for an omitted bound (changed from `_`
+  by SPEC Q1).
 - **D5 (2026-09-21): composite-literal elements are explicit.**
   `(:lit T elem...)`. A keyed element is `(:kv key value)`. An inner literal
-  with its type omitted is `(:lit _ elem...)` (Go's bare `{...}`).
+  with its type omitted is `(:lit :_ elem...)` (Go's bare `{...}`; `:_` per SPEC Q1).
 - **D6 (2026-09-21): Go-style variadics.** The param type is `(... T)`
   (`DotsType`). A call spreads with a trailing `...` symbol: `(f a xs ...)`.
 - **D8 (2026-09-21): extension `.lgo`.**
@@ -324,8 +325,8 @@ writing `SPEC.md`:
 - **D14 (2026-09-21): no `*`/`&` shorthand.** Always `(* x)` / `(& x)`. With
   one argument, `*` is deref or a pointer type. With two or more, it's
   multiplication.
-- **D15 (2026-09-21): for.** Header vector: `[init cond post]` (`_` =
-  omitted), `[cond]`, `[]`. Range: the short form `[k v (range xs)]` means
+- **D15 (2026-09-21): for.** Header vector: `[init cond post]` (`:_` =
+  omitted, per SPEC Q1), `[cond]`, `[]`. Range: the short form `[k v (range xs)]` means
   `:=`. The Go-shaped `[(= [k v] (range xs))]` and `[(range xs)]` cover the
   rest. `range` is a Go keyword, so none of these is ambiguous.
 - **D16 (2026-09-21): switch.** Case values always go in a vector. The type

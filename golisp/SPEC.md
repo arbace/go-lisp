@@ -125,13 +125,13 @@ Round-trip: Go's shared-type grouping (`a, b int`) is expanded to pairs.
 |---|---|---|
 | `Name` | `sym` | D18 mapping (bare) |
 | `BasicLit` | number / string / raw / rune token | Value verbatim |
-| `CompositeLit` | `(:lit T elem*)`, `(:lit _ elem*)` | `_` = no type (an elided inner literal). `NKeys` = the number of `:kv` elements. |
+| `CompositeLit` | `(:lit T elem*)`, `(:lit :_ elem*)` | `:_` = no type (an elided inner literal). `NKeys` = the number of `:kv` elements. |
 | `KeyValueExpr` | `(:kv key value)` | only as a `:lit` element. A keyword key `:w` is a field name (member rules). A bare key is an expression (bare rules). |
 | `FuncLit` | `(func [params] [results] stmt+)` | at least one form after the results vector [A6] |
 | `ParenExpr` | none | **[A8/F9]** Lisp has no need for it, and the parser never produces it. Removing it is neutral for **valid** programs. A few invalid ones become valid (`switch (x.(type))`, `(a) := 1`). Go needs parentheses when printing, so `lisp2go` must run a precedence-aware pass that inserts them (`syntax/printer.go` doesn't). |
 | `SelectorExpr` | `a.b.c` (name chains), `(:sel expr name)`, `(:sel expr a.b)` | D12. `name` uses member rules, so `x.-f` is the unexported `f`. |
 | `IndexExpr` | `(:index x i)`, `(:index f T1 T2 ...)` | Several indices make a `ListExpr` (instantiation). |
-| `SliceExpr` | `(:slice x lo hi)`, `(:slice x lo hi max)` | exactly 2 or 3 indices, with the omitted marker (see **Q1**) for missing ones. `Full` iff there are 3. |
+| `SliceExpr` | `(:slice x lo hi)`, `(:slice x lo hi max)` | exactly 2 or 3 indices, with `:_` for missing ones (Q1). `Full` iff there are 3. |
 | `AssertExpr` | `(:assert x T)` | |
 | `TypeSwitchGuard` | **[F2]** `(:assert x type)`, and `(:= v (:assert x type))` sets Lhs | The keyword `type` is never a type expression, so this can't be confused with an AssertExpr. This is the general form, which also covers the (invalid) `.(type)` outside a switch. `:type-switch` guards `[v x]` / `[x]` are sugar for it. |
 | unary `Operation` | `(op x)` for `! - + ^ * & <- ~` | `*` covers both deref and pointer type (same AST). `~` appears in constraints. |
@@ -185,7 +185,7 @@ head. Otherwise it's an expression statement.
 |---|---|
 | `[]` | `for {}` |
 | `[cond]` | `for cond {}` (unless the element is a range clause, below) |
-| `[init cond post]` | classic loop. Each part may be the omitted marker (**Q1**). init and post are simple statements. **[F6]** post must not be `:=`. |
+| `[init cond post]` | classic loop. Each part may be `:_` for omitted (Q1). init and post are simple statements. **[F6]** post must not be `:=`. |
 | `[(range x)]` | `for range x` |
 | `[k (range x)]`, `[k v (range x)]` | `k, v := range x` (short form). **The last element is a `range` form**, and since `range` is a keyword a classic post statement can't look like this. |
 | `[(:= lhs (range x))]`, `[(= lhs (range x))]` | long forms. lhs is a name/expression or a vector. |
@@ -277,7 +277,8 @@ itself:
   compiler sets `IgnoreBranchErrors`). This catches `break`/`continue`
   outside a loop, `fallthrough` in the last case or in a type switch,
   `goto` into a block or over a var decl, and undefined or unused labels.
-  `checkBranches` is unexported, which leads to question **Q2**.
+  The parser lives in package `syntax` (Q2), so it calls `checkBranches`
+  directly.
 - `:=` as a for post statement.
 - empty type-parameter vectors
 - `if`, `for`, or a switch clause missing a required part
@@ -337,20 +338,13 @@ Anything else that differs is a bug in the spec or the implementation.
 5. **Behavioral:** compile converted `$GOROOT/test` run-tests as `.lgo` and
    compare their output with the `.go` originals.
 
-## 11. Open questions
+## 11. Resolved questions
 
-- **Q1. The omitted marker.** D10/D15 use `_` for "omitted" (`(:slice x _ n)`,
-  `[(:= i 0) _ (++ i)]`), and D5 uses it for "no type" (`(:lit _ ...)`). But
-  `_` is also the blank identifier, so Go texts like `x[_:n]`, `_{}` and
-  `for _ {}` have no spelling. Go's parser accepts all three, and only
-  types2 rejects them. The range short form `[_ v (range x)]` also uses `_`
-  as the blank. Options: keep `_` (and narrow the "every parseable Go
-  source" claim to exclude these), or use `:_` as the marker everywhere
-  (`(:slice x :_ n)`, `(:lit :_ ...)`, `[:_ c :_]`).
-- **Q2. Where the parser lives.** `checkBranches` and Go's literal scanner
-  are unexported in `syntax`. Options:
-  - (a) Put the Lisp parser *inside* package `syntax` as new files
-    (`syntax/lisp_*.go`). No existing upstream file is edited, and it gets
-    full access.
-  - (b) A separate `lispsyntax` package, plus one new file in `syntax` that
-    exports small wrappers.
+- **Q1 (2026-09-21): `:_` means "omitted" everywhere**: `(:slice x :_ n)`,
+  `(:lit :_ ...)`, `[(:= i 0) :_ (++ i)]`, and unnamed param lists
+  `[:_ int string]`. `_` is always the blank identifier. This makes the
+  "every parseable Go source" claim hold without exceptions for `_`.
+- **Q2 (2026-09-21): the parser lives inside package `syntax`** as new files
+  `syntax/lisp_*.go`. It reuses `checkBranches`, Go's scanner for literal
+  validation, and the internal node constructors. No existing upstream file
+  is edited.

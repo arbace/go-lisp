@@ -2,7 +2,8 @@
 
 This is a fork of golang/go that adds a second front end to the gc compiler.
 It accepts the whole Go language written as Clojure/EDN-style s-expressions.
-The design lives in `golisp/DESIGN.md`. It is still being worked out with the
+The design lives in `golisp/DESIGN.md`, and the normative per-node grammar in
+`golisp/SPEC.md`. It is still being worked out with the
 user, one iteration at a time. Read it first, and ask the user before settling
 any open decision (D1, D2, ...). When a decision is settled, record it in the
 "Decided" section of that file.
@@ -20,7 +21,8 @@ any open decision (D1, D2, ...). When a decision is settled, record it in the
 
 The goal is painless merges from upstream golang/go.
 - Put new code in new files and directories:
-  `src/cmd/compile/internal/lispsyntax/` for the reader, parser and printer,
+  new `lisp_*.go` files in `src/cmd/compile/internal/syntax/` for the reader,
+  parser and printer (in-package, so they can reuse unexported helpers),
   and `golisp/` for docs and specs.
 - If an existing upstream file must change, keep the edit as small as
   possible (a one-line hook) and mark it with a `// go-lisp:` comment, so
@@ -43,6 +45,6 @@ The goal is painless merges from upstream golang/go.
 - The bootstrap toolchain is the system `go` (1.27). Build this tree with
   `cd src && ./make.bash`. Afterwards, use `bin/go` from the repo root, not
   the system `go`, to test compiler packages.
-- Fast loop: `bin/go test cmd/compile/internal/syntax cmd/compile/internal/lispsyntax`.
+- Fast loop: `bin/go test cmd/compile/internal/syntax -run Lisp`.
 - After changing the compiler, rebuild the toolchain with
   `bin/go install cmd/compile`, or rerun `make.bash`.
