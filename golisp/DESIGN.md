@@ -58,8 +58,9 @@ foo.go ──┴─ syntax.Parse ──────┴──> *syntax.File ─�
 
 ## 4. Candidate syntax (v0 sketch, for discussion)
 
-Base convention for this sketch: Go keywords and Go operators are the heads
-of special forms. Vectors hold bindings, parameters and groups. Dotted
+Base convention (D1/D9 decided): Go keywords and Go operators are the heads
+of special forms. Forms that Go spells without a keyword use **keyword heads**
+(`:index`, `:lit`, ...). Vectors hold bindings, parameters and groups. Dotted
 symbols are selectors.
 
 ```clojure
@@ -83,14 +84,14 @@ symbols are selectors.
   (return (* r.W r.H)))
 
 ;; generics: type-parameter vector, then params, then results
-(func Map [T any, U any] [xs ([] T), f (func [T] [U])] [([] U)]
-  (:= out (make ([] U) 0 (len xs)))
+(func Map [T any, U any] [xs (:slice T), f (func [T] [U])] [(:slice U)]
+  (:= out (make (:slice U) 0 (len xs)))
   (for [_ x (range xs)]
     (= out (append out (f x))))
   (return out))
 
 (func main [] []
-  (:= r (lit Rect {W 3 H 4}))    ; Rect{W: 3, H: 4}
+  (:= r (:lit Rect {W 3 H 4}))   ; Rect{W: 3, H: 4}
   (if [(:= [v ok] (lookup r))] ok
     (fmt.Println v)
     (else (panic "no")))
@@ -108,10 +109,10 @@ symbols are selectors.
 | `x.f`, `pkg.F` | `x.f`, `pkg.F` | dotted symbol -> chain of `SelectorExpr` |
 | `f(a, b)` | `(f a b)` | |
 | `f(xs...)` | `(f & xs)` or `(f (... xs))` | D6 |
-| `a[i]` | `(aget a i)` / `(. a i)` / ? | D1: needs a form name |
-| `a[lo:hi:max]` | `(slice a lo hi max)` / ? | D1 |
-| `F[int, string]` (instantiation) | `(F int string)`? no, that is a call | `IndexExpr`, same form as `a[i]` |
-| `x.(T)` | `(assert x T)` / ? | D1 |
+| `a[i]` | `(:index a i)` | |
+| `a[lo:hi:max]` | `(:slice a lo hi max)`? | D10: clashes with the slice type |
+| `F[int, string]` (instantiation) | `(:index F int string)` | Go parses this as `IndexExpr` too |
+| `x.(T)` | `(:assert x T)` | |
 | `T(x)` conversion | `(T x)` / `((* T) x)` | just a call, same as in Go |
 | `*p`, `&x` | `(* p)`, `(& x)`; sugar `*p`, `&x` | symbols with `*`/`&` can't be Go identifiers |
 | `a + b + c` | `(+ a b c)` | n-ary ops fold to the left |
@@ -122,55 +123,40 @@ symbols are selectors.
 | `var x T = e` | `(var x T e)`, `(var x T)`, `(var x _ e)`? | D4 |
 | `const ( A T = iota; B; C )` | `(const [A T iota] [B] [C])` | groups matter (iota, repeated values) |
 | `type A = B` | `(type A = B)` | alias |
-| `[]T`, `[N]T`, `[...]T` | `([] T)`, `([N] T)`, `([...] T)`? | D1 |
+| `[]T`, `[N]T`, `[...]T` | `(:slice T)`?, `(:array N T)`, `(:array ... T)` | D10 |
 | `map[K]V`, `chan T`, `<-chan T`, `chan<- T` | `(map K V)`, `(chan T)`, `(<-chan T)`, `(chan<- T)` | `map` and `chan` are Go keywords, so no collisions |
 | `func(int) error` | `(func [int] [error])` | type: params without names |
 | `func(x int) int { ... }` | `(func [x int] [int] ...)` | func literal = func with no name |
-| `T{...}` | `(lit T ...)` / `(T. ...)` / ? | D5: elided inner types as `[..]`, keyed items as `{k v}` |
+| `T{...}` | `(:lit T ...)` | D5: elided inner types as `[..]`, keyed items as `{k v}` |
 | `if init; c {} else {}` | `(if [init] c then... (else ...))` | D3 |
 | `for i := 0; i < n; i++ {}` | `(for [(:= i 0) (< i n) (++ i)] ...)` | |
 | `for c {}` / `for {}` | `(for [c] ...)` / `(for [] ...)` | |
 | `for k, v := range xs {}` | `(for [k v (range xs)] ...)`; `(for [k v (= range xs)] ...)`? | `=` vs `:=` range |
 | `switch` / type switch / `select` | `(switch ...)` / `(switch [v (type x)] ...)` / `(select (case (<- ch v) ...))` | |
-| `L: for ...`, `break L`, `goto L` | `(label L (for ...))`? `(break L)` `(goto L)` | D1 |
+| `L: for ...`, `break L`, `goto L` | `(:label L (for ...))`, `(break L)`, `(goto L)` | |
 | `//go:noinline` | `;go:noinline` (same rule as Go comments) or `^{:go/noinline true}` | D7 |
 | literals | EDN strings, `\a` chars, numbers; Go-only number formats `0x1p-2`, `1_000`, `3i`, `0o17` | D2 |
 
 ## 5. Open decisions
 
-- **D1: names for non-keyword forms.** Go has 25 keywords, and they are safe
-  to use as heads. We still need about 10 more forms: index, slice
-  expression, type assertion, slice/array type, composite literal, label,
-  block, and possibly others. Options:
-  - (a) Reserve plain words (`index`, `slice`, `lit`, `label`, `do`, ...) and
-    add an escape for Go identifiers that collide, for example `|slice|`.
-  - (b) Use heads that can't be Go identifiers: punctuation (`([] T)`),
-    names with `-`, `!` or `?`, or leading-dot Clojure interop (`.-field`,
-    `.method`).
-  - (c) Use keyword heads (`(:index a i)`). No collisions and valid EDN, but
-    visually noisy.
-  - (d) Use namespaced symbols (`go/index`). `/` never appears in Go
-    identifiers.
-- **D2: reader strictness.** Strict EDN (only `#tag`, `#_` and `#{}`) or the
-  Clojure reader subset (`^meta`, `@x`, `'x`, `#"re"`)? Go-only lexical
-  things such as raw strings, hex floats, `_` in numbers, imaginary literals
-  and `0o` literals need an answer either way.
 - **D3: statement shape of `if`/`else`.** Should `(if c then else)` behave
   like Clojure, with `(do ...)` for blocks? Or should the form be Go-shaped?
   Where does the `init` go?
 - **D4: optional types in `var`/`const`, grouped names.** `var a, b int`
   versus `var a, b = 1, 2`. Positional forms become ambiguous here. Keyword
   markers could fix it, for example `(var [a b] :- int := [1 2])`.
-- **D5: composite literals.** `(lit T ...)`, the Clojure constructor
-  `(T. ...)`, or a tagged literal `#T{...}`?
+- **D5: composite literals.** The head is decided: `(:lit T ...)`. Still
+  open: how elements are written (a vector for an inner literal with its type
+  omitted, a map for keyed elements?), and whether evaluation order is kept.
 - **D6: variadics.** Clojure's `&` in params and calls, or `(... T)`?
 - **D7: pragmas and build constraints.** `go/build` reads `//go:build` from
   the file header, so the header format is fixed early.
-- **D8: file extension** (`.lgo`, `.gol`, `.golisp`, `.edn`?) and the
-  integration scope (compiler only vs `go build`).
-- **D9: Clojure vocabulary.** Should there be aliases such as `defn`, `fn`,
-  `let`, `when`, `cond` or `doseq`? Each would have to be pure syntax sugar
-  with an exact Go AST equivalent, because of principle 2.
+- **D8: file extension** (`.lgo`, `.gol`, `.golisp`, `.edn`?). The scope
+  part is decided (see below).
+- **D10: slice type vs slice expression.** Both want the name `:slice`.
+  Candidates: `(:slice T)` for the type with `(:slice-expr a lo hi)`, or
+  `(:slice-of T)` for the type with `(:slice a lo hi)`.
+
 
 ## 6. Roadmap
 
@@ -189,4 +175,18 @@ symbols are selectors.
 
 ## Decided
 
-(nothing yet)
+- **D1 (2026-09-21): keyword heads.** Forms without a Go keyword use EDN
+  keyword heads: `(:index a i)`, `(:assert x T)`, `(:lit T ...)`,
+  `(:label L ...)`. Keywords can never be Go identifiers, so every Go
+  identifier stays expressible without escapes.
+- **D2 (2026-09-21): EDN plus minimal Go lexemes.** Strict EDN (lists,
+  vectors, maps, sets, `#_`, `#tag`), extended only with what Go literals need:
+  raw strings (for example `#go/raw "..."`), hex floats, `_` digit
+  separators, imaginary literals, `0o`/`0b` prefixes, and rune characters.
+  No `^`, `@`, `'` or `#"..."`.
+- **D9 (2026-09-21): Go vocabulary, Lisp shape.** Heads are Go keywords and
+  operators (`func`, `var`, `for`, `range`, `:=`, `==`). No Clojure aliases
+  (`defn`, `let`, ...).
+- **Scope (2026-09-21):** milestone 1 is the compiler (`go tool compile`
+  accepts Lisp files) plus the round-trip test over `$GOROOT/src` and
+  `$GOROOT/test`. `go build` support comes later.
