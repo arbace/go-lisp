@@ -1,6 +1,6 @@
 # go-lisp: design notes (living document)
 
-Status: **draft v0**. The syntax is not settled. Every decision below that is
+Status: **draft v1**. The syntax is not settled. Every decision below that is
 still open has an ID (D1, D2, ...) so we can talk about it and update it.
 Settled decisions move to the "Decided" log at the bottom.
 
@@ -56,99 +56,137 @@ foo.go ──┴─ syntax.Parse ──────┴──> *syntax.File ─�
   gopls, vet, cgo and `go/types` stay Go-only. Until they support Lisp,
   tools can run on the converted `.go` output.
 
-## 4. Candidate syntax (v0 sketch, for discussion)
+## 4. Syntax sketch (v1)
 
-Base convention (D1/D9 decided): Go keywords and Go operators are the heads
-of special forms. Forms that Go spells without a keyword use **keyword heads**
-(`:index`, `:lit`, ...). Vectors hold bindings, parameters and groups. Dotted
-symbols are selectors.
+Conventions (decided): Go keywords and operators head special forms (D9).
+Forms without a Go keyword use keyword heads (D1). Dotted symbols are
+selectors. Directives are `;go:` comments (D7).
 
 ```clojure
+;go:build linux || darwin
+
 (package main)
 
 (import "fmt"
-        [str "strings"]          ; import str "strings"
+        "os"
+        [str "strings"]           ; import str "strings"
         [_ "embed"])
 
 (type Shape
   (interface
-    (Area [] [float64])))        ; method: name, params, results
+    (Area [] [float64])))         ; method: name, params, results
 
 (type Rect
   (struct
-    [W H float64]
-    [Name string "json:\"name\""]))   ; optional tag
+    [W H float64]                 ; struct fields: see D13
+    [Name string "json:\"name\""]
+    [io.Reader]))                 ; embedded field
 
-;; method: the receiver vector comes before the name, as in Go
+(const
+  (Sunday Weekday = iota)
+  (Monday)
+  (Tuesday))
+
+;; method: the receiver pair comes before the name, as in Go
 (func [r *Rect] Area [] [float64]
   (return (* r.W r.H)))
 
-;; generics: type-parameter vector, then params, then results
+;; generics: three vectors after the name = type params, params, results
 (func Map [T any, U any] [xs (:slice-of T), f (func [T] [U])] [(:slice-of U)]
   (:= out (make (:slice-of U) 0 (len xs)))
   (for [_ x (range xs)]
     (= out (append out (f x))))
   (return out))
 
+(func Printf [format string, args (... any)] [n int, err error]
+  (return (fmt.Fprintf os.Stdout format args ...)))
+
+(func split [s string] [:_ string string]   ; unnamed results, even count: :_
+  (return (:slice s _ 1) (:slice s 1 _)))
+
 (func main [] []
-  (:= r (:lit Rect {W 3 H 4}))   ; Rect{W: 3, H: 4}
+  (:= r (:lit Rect (:kv W 3) (:kv H 4)))              ; Rect{W: 3, H: 4}
+  (:= ps (:lit (:slice-of Point) (:lit _ 1 2) (:lit _ (:kv X 3))))
   (var n int = 0)
-  (if [(:= [v ok] (lookup r))] ok
+  (if [(:= [v ok] (:index m "k"))] ok
     (fmt.Println v)
     (else if (> n 0)
       (return))
     (else
       (panic "no")))
+  (for [i p (range ps)]
+    (fmt.Println i p))
   (defer (fmt.Println "bye"))
   (go (work &r))
-  (switch x
+  (switch n
     (case [1 2] (fmt.Println "small"))
-    (default (fallthrough))))
+    (default (fmt.Println "big"))))
 ```
 
-### 4.1 Mapping table (v0)
+### 4.1 Mapping table
 
-| Go | Lisp (v0 proposal) | Notes |
+| Go | Lisp | Status |
 |---|---|---|
-| `x.f`, `pkg.F` | `x.f`, `pkg.F` | dotted symbol -> chain of `SelectorExpr` |
+| `x.f`, `pkg.F`, `a.b.c` | `x.f`, `pkg.F`, `a.b.c` | dotted symbol -> `SelectorExpr` chain |
+| `f().X` (selector on a non-name) | ? | D12 |
 | `f(a, b)` | `(f a b)` | |
-| `f(xs...)` | `(f & xs)` or `(f (... xs))` | D6 |
-| `a[i]` | `(:index a i)` | |
-| `a[lo:hi:max]`, `a[:n]` | `(:slice a lo hi max)`, `(:slice a _ n)` | `_` marks an omitted bound |
-| `F[int, string]` (instantiation) | `(:index F int string)` | Go parses this as `IndexExpr` too |
+| `f(xs...)` | `(f xs ...)` | D6 |
+| `a[i]`, `F[int, string]` | `(:index a i)`, `(:index F int string)` | both are `IndexExpr` |
+| `a[lo:hi:max]`, `a[:n]` | `(:slice a lo hi max)`, `(:slice a _ n)` | D10 |
 | `x.(T)` | `(:assert x T)` | |
-| `T(x)` conversion | `(T x)` / `((* T) x)` | just a call, same as in Go |
-| `*p`, `&x` | `(* p)`, `(& x)`; sugar `*p`, `&x` | symbols with `*`/`&` can't be Go identifiers |
-| `a + b + c` | `(+ a b c)` | n-ary ops fold to the left |
-| `a == b` | `(== a b)` | Go spelling: `=` is assignment, `==` is equality |
-| `<-ch` / `ch <- v` | `(<- ch)` / `(<- ch v)` | 1 arg receives, 2 args send |
-| `x := e` / `a, b := f()` | `(:= x e)` / `(:= [a b] (f))` | |
+| `T(x)` conversion | `(T x)`, `((* T) x)` | an ordinary call, as in Go |
+| `*p`, `&x` | `(* p)`, `(& x)`; sugar `*p`, `&x`? | D14 |
+| `a + b + c`, `-x`, `!b` | `(+ a b c)`, `(- x)`, `(! b)` | n-ary ops fold to the left |
+| `a == b` | `(== a b)` | Go spelling |
+| `<-ch`, `ch <- v` | `(<- ch)`, `(<- ch v)` | 1 arg receives, 2 args send |
+| `x := e`, `a, b := f()` | `(:= x e)`, `(:= [a b] (f))` | |
 | `x = e`, `x += e`, `i++` | `(= x e)`, `(+= x e)`, `(++ i)` | |
-| `var x T = e` | `(var x T = e)`, `(var x T)`, `(var x = e)`, `(var [a b] = (f))` | `=` separates type and values, as in Go |
-| `const ( A T = iota; B; C )` | `(const (A T = iota) (B) (C))` | a group is a list of spec lists (iota, repeated values) |
-| `type A B`, `type A = B` | `(type A B)`, `(type A = B)`, group `(type (A B) (C = D))` | |
-| `[]T`, `[N]T`, `[...]T` | `(:slice-of T)`, `(:array-of N T)`, `(:array-of ... T)` | |
-| `map[K]V`, `chan T`, `<-chan T`, `chan<- T` | `(map K V)`, `(chan T)`, `(<-chan T)`, `(chan<- T)` | `map` and `chan` are Go keywords, so no collisions |
-| `func(int) error` | `(func [int] [error])` | type: params without names |
-| `func(x int) int { ... }` | `(func [x int] [int] ...)` | func literal = func with no name |
-| `T{...}` | `(:lit T ...)` | D5: elided inner types as `[..]`, keyed items as `{k v}` |
-| `if init; c {} else if d {} else {}` | `(if [init] c stmts... (else if d stmts...) (else stmts...))` | else-ifs are a flat chain of trailing forms |
-| `for i := 0; i < n; i++ {}` | `(for [(:= i 0) (< i n) (++ i)] ...)` | |
-| `for c {}` / `for {}` | `(for [c] ...)` / `(for [] ...)` | |
-| `for k, v := range xs {}` | `(for [k v (range xs)] ...)`; `(for [k v (= range xs)] ...)`? | `=` vs `:=` range |
-| `switch` / type switch / `select` | `(switch ...)` / `(switch [v (type x)] ...)` / `(select (case (<- ch v) ...))` | |
-| `L: for ...`, `break L`, `goto L` | `(:label L (for ...))`, `(break L)`, `(goto L)` | |
-| `//go:noinline`, `//go:build ...` | `;go:noinline`, `;go:build ...` | a `;go:` line comment at column 1 is a directive |
-| literals | EDN strings, `\a` chars, numbers; Go-only number formats `0x1p-2`, `1_000`, `3i`, `0o17` | D2 |
+| `var`/`const` | `(var x T = e)`, `(var x T)`, `(var x = e)`, `(var [a b] = (f))` | D4 |
+| groups | `(const (A T = iota) (B) (C))` | D4: all arguments are lists |
+| `type A B`, `type A = B` | `(type A B)`, `(type A = B)`, `(type (A B) (C = D))` | D4 |
+| generic type decl `type L[T any] ...` | `(type L [T any] ...)`? | D13 |
+| `[]T`, `[N]T`, `[...]T` | `(:slice-of T)`, `(:array-of N T)`, `(:array-of ... T)` | D10 |
+| `map[K]V`, `chan T`, `<-chan T`, `chan<- T` | `(map K V)`, `(chan T)`, `(<-chan T)`, `(chan<- T)` | |
+| `*T` | `(* T)` | D14 |
+| `func(int) error` | `(func [int] [error])` | odd length = unnamed types |
+| `func(int, string) (n int, err error)` | `(func [:_ int string] [n int, err error])` | D11 |
+| `func(x int) int { ... }` | `(func [x int] [int] stmts...)` | func literal = func without a name |
+| `...T` param | `(... T)` | D6 |
+| `T{...}` | `(:lit T elem...)`; `(:kv k v)`; elided type: `(:lit _ ...)` | D5 |
+| `if` | `(if [init]? c stmts... (else if d stmts...)* (else stmts...)?)` | D3 |
+| `for i := 0; i < n; i++ {}` | `(for [(:= i 0) (< i n) (++ i)] ...)` | D15 |
+| `for c {}` / `for {}` | `(for [c] ...)` / `(for [] ...)` | D15 |
+| `for k, v := range xs {}` | `(for [k v (range xs)] ...)` | D15: `=` form of range |
+| `switch` / type switch / `select` | `(switch [init]? tag (case [..] ...) (default ...))` | D16 |
+| `L: ...`, `break L`, `goto L` | `(:label L stmt)`, `(break L)`, `(goto L)` | |
+| `{ ... }` block statement | `(:block stmts...)` | |
+| `go f()`, `defer f()`, `return a, b` | `(go (f))`, `(defer (f))`, `(return a b)` | |
+| `//go:noinline` | `;go:noinline` | D7 |
+| literals | EDN strings, `\a` chars, numbers + Go number formats, raw strings `#go/raw "..."`? | D2, D17 |
 
 ## 5. Open decisions
 
-- **D5: composite literals.** The head is decided: `(:lit T ...)`. Still
-  open: how elements are written (a vector for an inner literal with its type
-  omitted, a map for keyed elements?), and whether evaluation order is kept.
-- **D6: variadics.** Clojure's `&` in params and calls, or `(... T)`?
-- **D8: file extension** (`.lgo`, `.gol`, `.golisp`, `.edn`?). The scope
-  part is decided (see below).
+- **D12: selector on a non-name expression** (`f().X`, `a[i].X`, `(*p).X`).
+  Options are `(:sel (f) X)`, `(. (f) X)`, or the Clojure-style `(.X (f))`.
+  The name `.X` can't be a Go identifier.
+- **D13: struct fields and generic type decls.** Should struct fields stay as
+  group vectors `[W H float64]` / `[Name string "tag"]` / `[io.Reader]`? They
+  hold tags and embedded fields, which don't fit flat pairs. Where do type
+  params go in `(type List [T any] (struct ...))`, and in interface elements
+  such as unions `(| (~ int) string)`?
+- **D14: pointer/address sugar.** `*T`, `*p` and `&x` as reader sugar for
+  `(* T)`, `(* p)` and `(& x)` on symbols? A symbol starting with `*` or `&`
+  can't be a Go identifier.
+- **D15: `for` shape details.** The header vector: 3 elements = classic
+  loop, 1 = condition, 0 = infinite, a trailing `(range ...)` = range loop.
+  How do we write the `=` (assign, not define) range form and a range with
+  no variables?
+- **D16: switch/select details.** The type switch
+  (`switch v := x.(type)`), the `select` cases (send, receive with `:=` or
+  `=`), and case-list vectors.
+- **D17: string lexemes.** How are raw strings (`#go/raw "..."`?) written,
+  and which rune escape syntax do we use (`\a`, `é`, `\newline`, Go's
+  `'\x00'`)?
 
 ## 6. Roadmap
 
@@ -197,3 +235,16 @@ symbols are selectors.
 - **D10 (2026-09-21): slices.** The types are `(:slice-of T)`,
   `(:array-of N T)` and `(:array-of ... T)`. The expression is
   `(:slice a lo hi max?)`, with `_` for an omitted bound.
+- **D5 (2026-09-21): composite-literal elements are explicit.**
+  `(:lit T elem...)`. A keyed element is `(:kv key value)`. An inner literal
+  with its type omitted is `(:lit _ elem...)` (Go's bare `{...}`).
+- **D6 (2026-09-21): Go-style variadics.** The param type is `(... T)`
+  (`DotsType`). A call spreads with a trailing `...` symbol: `(f a xs ...)`.
+- **D8 (2026-09-21): extension `.lgo`.**
+- **D11 (2026-09-21): flat name/type pairs** for params, results and type
+  params: `[a int, b int]` (commas are whitespace). A list of unnamed types
+  starts with `:_`. An odd-length list can only be unnamed types, so the
+  marker is optional there (`[float64]`). Pitfall: `[int error]` means *one
+  named* result `int` of type `error`, which is valid Go. Go's grouping
+  (`a, b int`) is not kept, so the round-trip test compares field lists
+  after expanding groups.
