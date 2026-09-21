@@ -8,7 +8,7 @@ This is the normative companion to `DESIGN.md`. For every node in
 
 The decisions it relies on are D1–D18 (see DESIGN.md). Points marked
 **[A#]** came out of the first ambiguity audit, and **[F#]** marks fixes from
-the second, adversarial audit. Both still need the user's approval.
+the second, adversarial audit. All A and F items were approved on 2026-09-21.
 
 Notation: `x?` means optional, `x*` means zero or more, and `x+` means one or
 more. `stmt*` is a statement list.
@@ -59,7 +59,7 @@ more. `stmt*` is a statement list.
 | Token | Rule |
 |---|---|
 | whitespace | space, tab, newline, CR, and **comma** |
-| `;` comment | to the end of the line. `;go:...` at column 1 is a directive (§9). **[A2]** `;line file:line[:col]` at column 1 is a line directive, mirroring `//line`. |
+| `;` comment | to the end of the line. `;go:...` is a directive (§7). **[A2]** `;line file:line[:col]` at column 1 is a line directive, mirroring `//line`. |
 | `#_ form` | discards the next form (EDN) |
 | `( )` `[ ]` | list, vector |
 | `{ }` `#{ }` `#tag` | read, but **reserved**: the parser rejects them (none is used yet) |
@@ -250,8 +250,10 @@ The rules are in DESIGN.md §4.2. The audits added these:
 
 ## 7. Directives
 
-`;go:NAME args` at column 1, with no space after `;`, goes to
-`PragmaHandler` as the text `go:NAME args`, with Go's attachment rules
+`;go:NAME args` (no space after `;`) goes to `PragmaHandler` as the text
+`go:NAME args`. As in Go, it is recognized in any column, and the handler's
+`blank` flag says whether only whitespace precedes it on its line. It follows
+Go's attachment rules
 **[F11]**:
 - directives before `(package ...)` go to `File.Pragma` (`;go:build`,
   `;go:debug`)
