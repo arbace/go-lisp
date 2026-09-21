@@ -1,6 +1,6 @@
 # go-lisp: design notes (living document)
 
-Status: **draft v2**. The syntax is not settled. Every decision below that is
+Status: **draft v3**. The syntax is not settled. Every decision below that is
 still open has an ID (D1, D2, ...) so we can talk about it and update it.
 Settled decisions move to the "Decided" log at the bottom.
 
@@ -56,97 +56,149 @@ foo.go ──┴─ syntax.Parse ──────┴──> *syntax.File ─�
   gopls, vet, cgo and `go/types` stay Go-only. Until they support Lisp,
   tools can run on the converted `.go` output.
 
-## 4. Syntax sketch (v2)
+## 4. Syntax sketch (v3)
 
 Conventions (decided): Go keywords and operators head special forms (D9).
 Forms without a Go keyword use keyword heads (D1). Dotted symbols are
-selectors. Directives are `;go:` comments (D7).
+selectors. Directives are `;go:` comments (D7). Names are kebab-case and
+exported by default; `-name` is unexported (D18, §4.2). The comments show
+the Go names.
 
 ```clojure
 ;go:build linux || darwin
 
-(package main)
+(package main)                     ; package names are never mapped
 
 (import "fmt"
         "os"
-        [str "strings"]           ; import str "strings"
+        "regexp"
+        [str "strings"]            ; alias: Str
         [_ "embed"])
 
-(type Shape
+(type shape                        ; type Shape
   (interface
-    (Area [] [float64])))         ; method: name, params, results
+    (area [] [float64])))          ; method Area
 
-(type Rect
+(type rect                         ; type Rect
   (struct
-    [W H float64]                 ; field group: names... Type "tag"?
-    [Name string "json:\"name\""]
-    [io.Reader]                   ; embedded field
-    [(* Base) "tag"]))            ; embedded pointer with tag
+    [w h float64]                  ; W, H
+    [name string "json:\"name\""]  ; Name
+    [-cache float64]               ; cache (unexported)
+    [io.reader]                    ; embedded io.Reader
+    [(* -base) "tag"]))            ; embedded *base
 
-(type List [T any]               ; generic type: type params after the name
-  (struct [head (* (:index node T))]))
+(type -list [t any]                ; type list[T any]
+  (struct [-head (* (:index -node t))]))
 
-(type Number
+(type number
   (interface
-    (| (~ int) (~ float64))       ; union / approximation elements
-    fmt.Stringer                  ; embedded interface
-    (String [] [string])))        ; method
+    (| (~ int) (~ float64))
+    fmt.stringer                   ; fmt.Stringer
+    (string [] [string])))         ; method String; the result is the type string
 
 (const
-  (Sunday Weekday = iota)
-  (Monday)
-  (Tuesday))
+  (sunday weekday = iota)          ; Sunday Weekday = iota
+  (monday)
+  (tuesday))
 
-;; method: the receiver pair comes before the name, as in Go
-(func [r (* Rect)] Area [] [float64]
-  (return (* r.W r.H)))
+(func [r (* rect)] area [] [float64]          ; func (R *Rect) Area() float64
+  (return (* r.w r.h)))                        ; R.W * R.H
 
-;; generics: three vectors after the name = type params, params, results
-(func Map [T any, U any] [xs (:slice-of T), f (func [T] [U])] [(:slice-of U)]
-  (:= out (make (:slice-of U) 0 (len xs)))
+(func Map [t any, u any] [xs (:slice-of t), f (func [t] [u])] [(:slice-of u)]
+  ;; `map` is a Go keyword, so the exported name is written as Map
+  (:= out (make (:slice-of u) 0 (len xs)))     ; len, make: predeclared, unchanged
   (for [_ x (range xs)]
     (= out (append out (f x))))
   (return out))
 
-(func Printf [format string, args (... any)] [n int, err error]
-  (return (fmt.Fprintf os.Stdout format args ...)))
-
-(func split [s string] [:_ string string]   ; unnamed results, even count: :_
+(func -split [s string] [:_ string string]    ; func split(S string) (string, string)
   (return (:slice s _ 1) (:slice s 1 _)))
 
-(func main [] []
-  (:= r (:lit Rect (:kv W 3) (:kv H 4)))              ; Rect{W: 3, H: 4}
-  (:= ps (:lit (:slice-of Point) (:lit _ 1 2) (:lit _ (:kv X 3))))
-  (var n int = 0)
-  (if [(:= [v ok] (:index m "k"))] ok
-    (fmt.Println v)
-    (else if (> n 0)
-      (return))
-    (else
-      (panic "no")))
-  (for [i p (range ps)]
-    (fmt.Println i p))
-  (defer (fmt.Println "bye"))
-  (go (work (& r)))
-  (switch n
-    (case [1 2] (fmt.Println "small") (fallthrough))
-    (default (fmt.Println "big")))
-  (:type-switch [v x]
-    (case [int string] (use v))
-    (case [nil] (none)))
-  (select
-    (case (<- out v) (sent))
-    (case (:= [y ok] (<- in)) (got y ok))
-    (default (idle)))
-  (:= re (regexp.MustCompile `\d+\.go`))   ; raw string
+(func main [] []                               ; main: never mapped
+  (:= r (:lit rect (:kv :w 3) (:kv :h 4)))     ; Rect{W: 3, H: 4}
+  (fmt.println (r.area))                       ; fmt.Println(R.Area())
+  (:= rd (str.new-reader "x"))                 ; Str.NewReader
+  (:= [data err] (io.read-all rd))             ; io.ReadAll
+  (if (== err io.EOF) (return))                ; acronym segment stays as written
+  (http.handle-func "/" handler)               ; http.HandleFunc
+  (:= re (regexp.must-compile `\d+\.go`))      ; raw string
   (if (== c '\n') (++ lines)))
 ```
+
+### 4.2 Names (D18)
+
+The export bit is carried by the spelling, and the parser maps each Lisp name
+to a Go identifier **lexically**: the result depends only on the name's
+spelling, whether it is a bare name or a member name, and the file's import
+list. The syntax tree still contains ordinary Go names, so types2 is
+unchanged. Because the mapping is a function of the name alone, shadowing
+works the same in both languages.
+
+Mapping one name, `M(name)`:
+
+1. `_` maps to `_`.
+2. **Kebab join.** Split on `-` (after removing a leading `-`, see 4). Each
+   segment after the first gets its first rune upper-cased, then the segments
+   are joined: `read-all` becomes `readAll`, `serve-HTTP` becomes `serveHTTP`,
+   and `HTTP-client` becomes `HTTPClient`. Other runes are never changed, so
+   a segment written in capitals stays in capitals (acronyms). Empty segments
+   (`a--b`, `a-`) are an error.
+3. **Uppercase first rune: verbatim.** `EOF`, `URL`, `ReadAll`, `Map` and
+   `New` map to themselves (after the kebab join). This keeps every exported
+   Go identifier writable, and it's the only way to write an exported name
+   that is a Go keyword or an exempt name.
+4. **Leading `-`: unexported.** Remove the `-`, kebab-join, and don't touch
+   the first rune: `-helper` becomes `helper` and `-read-all` becomes `readAll`.
+5. **Otherwise: exported.** Kebab-join and upper-case the first rune:
+   `rect` becomes `Rect` and `new-reader` becomes `NewReader`. If the first
+   rune has no uppercase form (`_x`, non-Latin scripts), the name stays
+   unexported, as in Go.
+
+**Bare names vs member names.** Member names are selector names after a
+dot, field names, method names (in declarations and interfaces), and
+keyword keys in composite literals (`(:kv :w 3)`). They always use rules
+1-5. Bare names are every other identifier: declarations, locals, params,
+results, receivers, type params, labels, and references. Bare names also
+have an **exemption list** of names that map verbatim:
+- all predeclared identifiers: `int`, `string`, `error`, `any`,
+  `comparable`, `true`, `false`, `nil`, `iota`, `len`, `make`, `new`,
+  `append`, `panic`, `print`, `println`, `min`, `max`, `clear`, ...
+- `main` and `init`
+- the package name in `(package ...)`
+- this file's **implicit import names**. They are guessed from the import
+  path: the last element, or the one before it when the last is `vN`. If the
+  imported package is really named something else, give it an alias:
+  `[yaml "github.com/x/go-yaml"]`.
+
+Because of the exemptions, `(func new ...)` declares a package-level `new`
+that shadows the builtin, exactly as Go's `func new` would. An exported
+`New`, `Error` or `String` at package level must be written with a capital.
+Member names have no exemptions, so methods are written `error`, `string`
+and `len`, and become `Error`, `String` and `Len`.
+
+**Struct-literal keys.** The parser can't tell whether a composite-literal
+key is a field name or a variable (for a map), so field keys are written as
+keywords, `(:kv :w 3)`, which gives them member rules. A bare key is an
+expression. The Go → Lisp printer can't tell either, so it prints keys as
+bare names, which is always correct.
+
+**Consequences, and follow-up work:**
+- Locals come out capitalized in Go: `(:= x 1)` becomes `X := 1`. The
+  meaning is the same; only the look of the generated Go changes.
+- Compiler errors print Go names (`undefined: ReadAll`, `declared and not
+  used: X`). Later: map them back for `.lgo` diagnostics.
+- In Go code converted to Lisp by `go2lisp`, every unexported identifier
+  gets `-` (`-err`, `-i`). A later "idiomatic" printer mode could rename
+  locals where that's safe. The round-trip test uses exact names.
+- Directive text (`;go:linkname`, `;go:embed`, `//export`) uses Go names
+  verbatim.
+- cgo: `C.-malloc` (member, unexported). cgo is out of scope for now.
 
 ### 4.1 Mapping table
 
 | Go | Lisp | Status |
 |---|---|---|
-| `x.f`, `pkg.F`, `a.b.c` | `x.f`, `pkg.F`, `a.b.c` | dotted symbol -> `SelectorExpr` chain |
+| `x.f`, `pkg.F`, `a.b.c` | `x.-f`, `pkg.f`, `a.b.c` | dotted symbol -> `SelectorExpr` chain; names per D18 |
 | `f().X`, `(*p).X.Y` | `(:sel (f) X)`, `(:sel (* p) X.Y)` | D12 |
 | `f(a, b)` | `(f a b)` | |
 | `f(xs...)` | `(f xs ...)` | D6 |
@@ -173,7 +225,7 @@ selectors. Directives are `;go:` comments (D7).
 | `func(int, string) (n int, err error)` | `(func [:_ int string] [n int, err error])` | D11 |
 | `func(x int) int { ... }` | `(func [x int] [int] stmts...)` | func literal = func without a name |
 | `...T` param | `(... T)` | D6 |
-| `T{...}` | `(:lit T elem...)`; `(:kv k v)`; elided type: `(:lit _ ...)` | D5 |
+| `T{...}` | `(:lit T elem...)`; `(:kv :field v)` / `(:kv expr v)`; elided type: `(:lit _ ...)` | D5, D18 |
 | `if` | `(if [init]? c stmts... (else if d stmts...)* (else stmts...)?)` | D3 |
 | `for i := 0; i < n; i++ {}` | `(for [(:= i 0) (< i n) (++ i)] ...)`; `_` = omitted part | D15 |
 | `for c {}` / `for {}` | `(for [c] ...)` / `(for [] ...)` | D15 |
@@ -285,3 +337,9 @@ writing `SPEC.md`:
   allowed. Runes are Go literals: `'a'`, `'\n'`, `'\x07'`, `'\U0001F600'`.
   This departs from EDN on purpose: there are no EDN `\c` chars, and D2
   left `'` unused.
+- **D18 (2026-09-21): names.** Kebab-case, exported by default, `-name`
+  unexported (like Clojure's `defn-`). A segment written in capitals stays
+  as written (`serve-HTTP`, `io.EOF`). Bare names have an exemption list:
+  predeclared names, `main`, `init`, the package name, and implicit import
+  names. The mapping is lexical, in the parser, with no types2 changes.
+  Full rules are in §4.2.
