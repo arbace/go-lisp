@@ -148,14 +148,20 @@ func lispCmp(path string, x, y reflect.Value) string {
 }
 
 // lispSliceElems returns the elements of a slice value; empty
-// statements are dropped from statement lists (SPEC §8.2).
+// statements and empty declaration groups (var ()) are dropped
+// from statement lists (SPEC §8.2).
 func lispSliceElems(v reflect.Value) []reflect.Value {
 	var list []reflect.Value
 	for i := range v.Len() {
 		e := v.Index(i)
 		if v.Type() == lispStmtSliceType {
-			if _, ok := e.Interface().(*EmptyStmt); ok {
+			switch s := e.Interface().(type) {
+			case *EmptyStmt:
 				continue
+			case *DeclStmt:
+				if len(s.DeclList) == 0 {
+					continue
+				}
 			}
 		}
 		list = append(list, e)
@@ -270,5 +276,184 @@ func FuzzLispRoundTrip(f *testing.F) {
 		if lisp, d := lispRoundTrip("fuzz.go", []byte(src)); d != "" {
 			t.Fatalf("round trip of %q: %s\n%s", src, d, lisp)
 		}
+		if out, d := lispRoundTripGo("fuzz.go", []byte(src)); d != "" && d != lispNotPrintable {
+			t.Fatalf("Go -> go-lisp -> Go of %q: %s\n%s", src, d, out)
+		}
 	})
+}
+
+// lispRoundTripGo converts Go source to go-lisp and back to Go
+// (Go -> go-lisp -> AST -> parenthesize -> Go -> AST) and compares the
+// result with the original tree and directives (SPEC F9).
+func lispRoundTripGo(filename string, src []byte) (goSrc, diff string) {
+	goSrc, diff = lispRoundTripGo1(filename, src)
+	if diff != "" {
+		// Excuse failures only where Go's own printer fails as well.
+		if f, err := Parse(NewFileBase(filename), bytes.NewReader(src), nil, nil, 0); err == nil && !lispGoPrintable(f) {
+			return goSrc, lispNotPrintable
+		}
+	}
+	return goSrc, diff
+}
+
+func lispRoundTripGo1(filename string, src []byte) (goSrc, diff string) {
+	collect := func(dirs *[]string) PragmaHandler {
+		return func(pos Pos, blank bool, text string, current Pragma) Pragma {
+			if text != "" {
+				// A trailing CR (from a CR CR LF line end) is not preserved.
+				*dirs = append(*dirs, strings.TrimRight(text, "\r"))
+			}
+			return current
+		}
+	}
+	var dirs1, dirs2 []string
+	f1, err := Parse(NewFileBase(filename), bytes.NewReader(src), nil, collect(&dirs1), 0)
+	if err != nil {
+		return "", ""
+	}
+	lisp, err := GoToLisp(filename, bytes.NewReader(src))
+	if err != nil {
+		return "", fmt.Sprintf("GoToLisp: %v", err)
+	}
+	out, err := LispToGo(filename, bytes.NewReader(lisp))
+	if err != nil {
+		return "", fmt.Sprintf("LispToGo: %v", err)
+	}
+	f2, err := Parse(NewFileBase(filename), bytes.NewReader(out), nil, collect(&dirs2), 0)
+	if err != nil {
+		return string(out), fmt.Sprintf("generated Go does not parse: %v", err)
+	}
+	if d := lispCompare(f1, f2); d != "" {
+		return string(out), d
+	}
+	if fmt.Sprint(dirs1) != fmt.Sprint(dirs2) {
+		return string(out), fmt.Sprintf("directives %q vs %q", dirs1, dirs2)
+	}
+	return string(out), ""
+}
+
+// lispNotPrintable is the diff reported for trees that Go's own printer
+// cannot round-trip; lisp2go is only expected to be as good as it.
+const lispNotPrintable = "(not printable as Go by the syntax printer)"
+
+// lispGoPrintable reports whether Go's syntax printer can print f so
+// that it parses back to the same tree. The Go parser accepts a few
+// invalid programs whose trees it cannot print, such as a type
+// parameter whose constraint came from a call: type A[A(~0)] int.
+// If the printer crashes (it cannot print var () statements), the tree
+// counts as printable, so that lisp2go, which handles that, is tested.
+func lispGoPrintable(f *File) (ok bool) {
+	defer func() {
+		if recover() != nil {
+			ok = true
+		}
+	}()
+	var b bytes.Buffer
+	if _, err := Fprint(&b, f, 0); err != nil {
+		return false
+	}
+	f2, err := Parse(NewFileBase("x.go"), &b, nil, nil, 0)
+	if err != nil {
+		return false
+	}
+	f2.GoVersion = f.GoVersion // the printer does not print //go:build lines
+	return lispCompare(f, f2) == ""
+}
+
+func TestLispToGoGolden(t *testing.T) {
+	src, err := os.ReadFile("testdata/lisp/print.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out, d := lispRoundTripGo("print.go", src); d != "" {
+		t.Errorf("Go -> go-lisp -> Go: %s\n%s", d, out)
+	}
+}
+
+func TestLispToGoParens(t *testing.T) {
+	for _, test := range []struct{ lisp, want string }{
+		{"(* (+ a b) c)", "(A + B) * C"},
+		{"(- a (- b c))", "A - (B - C)"},
+		{"(- (- a b) c)", "A - B - C"},
+		{"(|| a (&& b c))", "A || B && C"},
+		{"(&& (|| a b) c)", "(A || B) && C"},
+		{"(- (- x))", "-(-X)"},
+		{"(& (& x))", "&(&X)"},
+		{"(& (^ x))", "&(^X)"},
+		{"(* (* p))", "**P"},
+		{"(- (+ a b))", "-(A + B)"},
+		{"(:sel (* p) x)", "(*P).X"},
+		{"((* t) x)", "(*T)(X)"},
+		{"((func [] []) f)", "(func())(F)"},
+		{"((<-chan int) c)", "(<-chan int)(C)"},
+		{"(:index (+ a b) 0)", "(A + B)[0]"},
+		{"(chan (<-chan int))", "chan (<-chan int)"},
+		{"(chan<- (chan int))", "chan<- chan int"},
+		{"(<- (<- c))", "<-<-C"},
+	} {
+		out, err := LispToGo("x.lgo", strings.NewReader("(package p)\n(var _ = "+test.lisp+")"))
+		if err != nil {
+			t.Errorf("%s: %v", test.lisp, err)
+			continue
+		}
+		got := strings.TrimSpace(strings.TrimPrefix(string(out), "package p\n\nvar _ = "))
+		if got != test.want {
+			t.Errorf("%s:\ngot  %s\nwant %s", test.lisp, got, test.want)
+		}
+	}
+
+	// composite literals in statement headers
+	out, err := LispToGo("x.lgo", strings.NewReader(`(package p)
+(func -f [] []
+  (if (== x (:lit t)) ())
+  (for [(:= -i (:lit t)) (< -i.n 3) :_] ())
+  (switch (:lit t) (default))
+  (for [_ -v (range (:lit t (:kv :a 1)))] ()))`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"if X == (T{})", "i := (T{}); ", "switch (T{})", "range (T{"} {
+		if !strings.Contains(strings.ReplaceAll(string(out), "{ ", "{"), want) && !strings.Contains(string(out), want) {
+			t.Errorf("output does not contain %q:\n%s", want, out)
+		}
+	}
+	if _, err := Parse(NewFileBase("x.go"), bytes.NewReader(out), nil, nil, 0); err != nil {
+		t.Errorf("generated Go does not parse: %v\n%s", err, out)
+	}
+}
+
+// TestLispToGoCorpus checks Go -> go-lisp -> Go for every valid Go file
+// in $GOROOT/src and $GOROOT/test.
+func TestLispToGoCorpus(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping corpus test in short mode")
+	}
+	goroot := testenv.GOROOT(t)
+	var files, failed, skipped int
+	for _, dir := range []string{filepath.Join(goroot, "src"), filepath.Join(goroot, "test")} {
+		filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+			if err != nil || d.IsDir() || !strings.HasSuffix(path, ".go") {
+				return nil
+			}
+			src, err := os.ReadFile(path)
+			if err != nil {
+				t.Error(err)
+				return nil
+			}
+			files++
+			_, diff := lispRoundTripGo(path, src)
+			if diff == lispNotPrintable {
+				skipped++
+				return nil
+			}
+			if diff != "" {
+				failed++
+				if failed <= 25 {
+					t.Errorf("%s: %s", path, diff)
+				}
+			}
+			return nil
+		})
+	}
+	t.Logf("Go -> go-lisp -> Go for %d files, %d failed, %d skipped (not printable by Go's own printer)", files, failed, skipped)
 }

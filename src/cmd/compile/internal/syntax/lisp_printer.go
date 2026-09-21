@@ -447,16 +447,16 @@ func (p *lispPrinter) expr(x Expr) {
 		p.print(")")
 
 	case *TypeSwitchGuard:
-		// general form of x.(type) (SPEC F2)
+		// general forms of x.(type) and v := x.(type) (SPEC F2)
 		if x.Lhs != nil {
-			p.print("(:= ", p.decl(x.Lhs), " ")
+			p.print("(:type-guard [", p.decl(x.Lhs), " ")
+			p.expr(x.X)
+			p.print("])")
+			break
 		}
 		p.print("(:assert ")
 		p.expr(x.X)
 		p.print(" type)")
-		if x.Lhs != nil {
-			p.print(")")
-		}
 
 	case *Operation:
 		p.operation(x)
@@ -865,7 +865,7 @@ func (p *lispPrinter) forHeader(s *ForStmt) {
 			p.print("[(range ")
 			p.expr(r.X)
 			p.print(")]")
-		case r.Def && lispAllNames(lispUnpackList(r.Lhs)):
+		case r.Def && lispAllNames(lispUnpackList(r.Lhs)) && len(lispUnpackList(r.Lhs)) <= 2:
 			// short form: [k v (range x)] means k, v := range x (D15)
 			p.print("[")
 			for _, x := range lispUnpackList(r.Lhs) {
@@ -875,8 +875,9 @@ func (p *lispPrinter) forHeader(s *ForStmt) {
 			p.expr(r.X)
 			p.print(")]")
 		default:
-			// long form; also used for := with non-names on the left,
-			// which the Go parser accepts (types2 reports them)
+			// long form; also used for := with non-names or more than two
+			// names on the left, which the Go parser accepts (types2
+			// reports them)
 			op, lhsExpr := "=", p.expr
 			if r.Def {
 				op, lhsExpr = ":=", p.defLhs

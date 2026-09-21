@@ -133,7 +133,7 @@ Round-trip: Go's shared-type grouping (`a, b int`) is expanded to pairs.
 | `IndexExpr` | `(:index x i)`, `(:index f T1 T2 ...)` | Several indices make a `ListExpr` (instantiation). |
 | `SliceExpr` | `(:slice x lo hi)`, `(:slice x lo hi max)` | exactly 2 or 3 indices, with `:_` for missing ones (Q1). `Full` iff there are 3. |
 | `AssertExpr` | `(:assert x T)` | |
-| `TypeSwitchGuard` | **[F2]** `(:assert x type)`, and `(:= v (:assert x type))` sets Lhs | The keyword `type` is never a type expression, so this can't be confused with an AssertExpr. This is the general form, which also covers the (invalid) `.(type)` outside a switch. `:type-switch` guards `[v x]` / `[x]` are sugar for it. |
+| `TypeSwitchGuard` | **[F2]** `(:assert x type)`; with a name, `(:type-guard [v x])` | The keyword `type` is never a type expression, so this can't be confused with an AssertExpr. This is the general form, which also covers the (invalid) `.(type)` outside a switch. `:type-switch` guards `[v x]` / `[x]` are sugar for it. `(:= v (:assert x type))` is an assignment whose right side is a guard, which is what Go builds for `v := x.(type)` outside a switch header. `(:type-guard [v x])` is a guard that binds v itself, which is what Go builds in a switch header (for example in the init position). Both are only valid Go in the type switch tag. |
 | unary `Operation` | `(op x)` for `! - + ^ * & <- ~` | `*` covers both deref and pointer type (same AST). `~` appears in constraints. |
 | binary `Operation` | `(op x y)` | ops: `\|\| && == != < <= > >= + - \| ^ * / % & &^ << >>` |
 | n-ary chains | `(op a b c ...)` means `((a op b) op c)` | **[A9]** n-ary only for `+ - * / % & \| ^ &^ << >> && \|\|`. **Comparisons are strictly binary**, because Clojure's `(< a b c)` means something different. |
@@ -299,6 +299,9 @@ itself:
 normalizations, each of which is semantically neutral:
 1. Remove `ParenExpr` (A8).
 2. Remove `EmptyStmt` from statement lists, but not as a label target (A10).
+   Empty declaration groups (`var ()` as a statement) count as empty
+   statements too. Go's syntax printer cannot print them, so `lisp2go`
+   writes nothing for them.
 3. Expand field groups into single fields (D11).
 4. Ignore `Group` for single-spec declarations (D4).
 5. Treat `for ;; {}` as `for {}` (Go already produces the same AST).
@@ -311,7 +314,8 @@ normalizations, each of which is semantically neutral:
 String literals are compared **exactly** **[F13]**. The reader keeps
 Values verbatim, so any difference is a bug.
 
-**[F9] The reverse direction** is tested too:
+**[F9] The reverse direction** is tested too, and is implemented in
+`syntax.LispToGo` / `syntax.LispParenthesize`:
 `Lisp → AST → Go (lisp2go, with parens inserted) → AST'`. It must give the
 same tree. This catches precedence bugs in the Go printer. `syntax/printer.go`
 never adds parentheses, so without that pass `(* (+ a b) c)` would print as

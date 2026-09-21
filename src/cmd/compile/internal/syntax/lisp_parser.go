@@ -857,6 +857,20 @@ func (p *lispParser) listExpr(x *lispForm) Expr {
 		e.Type = p.expr(args[1])
 		return e
 
+	case ":type-guard":
+		// v := x.(type) as a guard expression, as in a type switch
+		// header's init position (F2); a type switch's tag is written
+		// with :type-switch instead.
+		if !nargs(1) || args[0].Kind != lispVector || len(args[0].Elems) != 2 {
+			p.errorf(x.Pos, "(:type-guard [v x]) needs a name and an operand")
+			return p.bad(x.Pos)
+		}
+		g := new(TypeSwitchGuard)
+		g.pos = x.Pos
+		g.Lhs = p.name(args[0].Elems[0], false, true)
+		g.X = p.expr(args[0].Elems[1])
+		return g
+
 	case ":sel":
 		if !nargs(2) {
 			return p.bad(x.Pos)
