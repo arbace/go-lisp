@@ -279,6 +279,12 @@ writing `SPEC.md`:
 | 5. `go build` support | done: the go command lists, builds, runs, and tests packages with `.lgo` files, alone or mixed with `.go` files, including `_test.lgo` files (internal and external test packages), `;go:build` constraints, OS/arch file suffixes, `;go:embed`, and file arguments (`go run main.lgo`). Header reading is shared in the new std package `internal/golisp` (used by `go/build` and `cmd/go`). Test: `go test cmd/go -run TestScript/golisp`. |
 | 6. Tooling | done: `go tool golisp` (`src/cmd/compile/golisp`) with `go2lisp`, `lisp2go` (gofmt-formatted, with parentheses added: `syntax.LispToGo`, F9), `build` and `run` (main packages of `.lgo` and `.go` files). `build`/`run` report compiler errors with go-lisp spellings of names (`-gonames` turns this off); expressions in messages stay in Go syntax. Go → go-lisp → Go reproduces every valid Go file in `$GOROOT`. |
 
+### Editor support
+
+Vim and Neovim: `golisp/vim` (see its README) adds filetype detection,
+syntax highlighting, indentation matching the go-lisp printer, `:make`
+with go-lisp error positions, and conversion commands.
+
 ### Known limits of go command support
 
 - **Vet:** `go vet` and the vet step of `go test` skip packages that have
