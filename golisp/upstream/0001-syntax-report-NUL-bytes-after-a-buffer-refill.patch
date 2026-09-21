@@ -1,0 +1,60 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: rhz <robert.zawiasa@gmail.com>
+Subject: [PATCH] cmd/compile/internal/syntax: report NUL bytes after a buffer refill
+
+The fast path of source.nextch reports a NUL byte only if it is not
+the first byte read after the buffer is filled or grown: in that case
+nextch finds the end-of-buffer sentinel, refills the buffer, and
+decodes the byte in its general path, which checked for invalid UTF-8
+and for a BOM, but not for NUL. So a NUL at such a position, for
+example at offset 8190 of a long string literal, was accepted and
+compiled into the program, while gofmt and vet reject the file.
+
+Check for NUL in the general path too.
+
+Fixes #81632
+
+Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
+---
+diff --git a/src/cmd/compile/internal/syntax/issues_test.go b/src/cmd/compile/internal/syntax/issues_test.go
+index d72890ca..b2176115 100644
+--- a/src/cmd/compile/internal/syntax/issues_test.go
++++ b/src/cmd/compile/internal/syntax/issues_test.go
+@@ -49,3 +49,19 @@ func TestIssue67866(t *testing.T) {
+ 		})
+ 	}
+ }
++
++// A NUL byte must be reported wherever it is, including right after
++// the scanner refills its buffer while reading a long literal (which it
++// missed for NULs at offsets 4075, 8190, 16382, ... of the string).
++func TestIssue81632(t *testing.T) {
++	for n := 1; n < 1<<15; n++ {
++		if n%4096 > 40 && n%4096 < 4096-40 {
++			continue // far from the buffer boundaries
++		}
++		src := "package p; var _ = \"" + strings.Repeat("a", n) + "\x00\""
++		_, err := Parse(nil, strings.NewReader(src), nil, nil, 0)
++		if err == nil || !strings.Contains(err.Error(), "invalid NUL character") {
++			t.Fatalf("NUL at offset %d of the string: got error %v; want invalid NUL character", n, err)
++		}
++	}
++}
+diff --git a/src/cmd/compile/internal/syntax/source.go b/src/cmd/compile/internal/syntax/source.go
+index 01b59215..5b91ade0 100644
+--- a/src/cmd/compile/internal/syntax/source.go
++++ b/src/cmd/compile/internal/syntax/source.go
+@@ -149,6 +149,13 @@ redo:
+ 	s.ch, s.chw = utf8.DecodeRune(s.buf[s.r:s.e])
+ 	s.r += s.chw
+ 
++	// The fast path above only sees a NUL byte if it is not the
++	// first byte after refilling the buffer (see go.dev/issue/81632).
++	if s.ch == 0 {
++		s.error("invalid NUL character")
++		goto redo
++	}
++
+ 	if s.ch == utf8.RuneError && s.chw == 1 {
+ 		s.error("invalid UTF-8 encoding")
+ 		goto redo

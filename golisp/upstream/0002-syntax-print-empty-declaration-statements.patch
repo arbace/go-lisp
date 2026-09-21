@@ -1,0 +1,56 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: rhz <robert.zawiasa@gmail.com>
+Subject: [PATCH] cmd/compile/internal/syntax: print empty declaration statements
+
+The parser produces a DeclStmt without declarations for an empty
+declaration group in a function body, such as var (), and the printer
+panicked on it, indexing the empty list. Print it as var (): the
+syntax tree does not record the keyword, and all keywords mean the
+same.
+
+Fixes #81633
+
+Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
+---
+diff --git a/src/cmd/compile/internal/syntax/printer.go b/src/cmd/compile/internal/syntax/printer.go
+index 86d93e89..4e8a458b 100644
+--- a/src/cmd/compile/internal/syntax/printer.go
++++ b/src/cmd/compile/internal/syntax/printer.go
+@@ -525,6 +525,13 @@ func (p *printer) printRawNode(n Node) {
+ 
+ 	// statements
+ 	case *DeclStmt:
++		if len(n.DeclList) == 0 {
++			// An empty declaration group, such as var ().
++			// The syntax tree does not record the keyword,
++			// and all keywords mean the same (go.dev/issue/81633).
++			p.print(_Var, blank, _Lparen, _Rparen)
++			break
++		}
+ 		p.printDecl(n.DeclList)
+ 
+ 	case *EmptyStmt:
+diff --git a/src/cmd/compile/internal/syntax/printer_test.go b/src/cmd/compile/internal/syntax/printer_test.go
+index 22585dfd..13a6a6de 100644
+--- a/src/cmd/compile/internal/syntax/printer_test.go
++++ b/src/cmd/compile/internal/syntax/printer_test.go
+@@ -289,3 +289,19 @@ func TestShortString(t *testing.T) {
+ 		}
+ 	}
+ }
++
++// An empty declaration group in a function body (go.dev/issue/81633).
++func TestPrintEmptyDeclStmt(t *testing.T) {
++	const src = "package p; func _() { var () }"
++	f, err := Parse(nil, strings.NewReader(src), nil, nil, 0)
++	if err != nil {
++		t.Fatal(err)
++	}
++	var buf strings.Builder
++	if _, err := Fprint(&buf, f, LineForm); err != nil {
++		t.Fatal(err)
++	}
++	if got := buf.String(); got != src {
++		t.Errorf("got %q; want %q", got, src)
++	}
++}
