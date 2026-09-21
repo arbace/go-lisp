@@ -52,7 +52,10 @@ The goal is painless merges from upstream golang/go.
   `bin/go test cmd/compile/internal/syntax -run TestLispRunCorpus -lisprun`.
 - Print any Go file as go-lisp:
   `bin/go test cmd/compile/internal/syntax -run TestLispPrintFile -lispsrc FILE.go`.
-- Compile a go-lisp file: `bin/go tool compile -p main -importcfg CFG -o x.o x.lgo`.
+- Tool: `bin/go install cmd/compile/golisp`, then `bin/go tool golisp run x.lgo`,
+  `... build`, `... go2lisp x.go`, `... lisp2go x.lgo`. The tool lives in
+  `src/cmd/compile/golisp` because it imports `cmd/compile/internal/syntax`.
+- Compile a go-lisp file by hand: `bin/go tool compile -p main -importcfg CFG -o x.o x.lgo`.
   The only upstream hook is in `noder/noder.go` (`git grep 'go-lisp:'`).
 - After changing the compiler, rebuild the toolchain with
   `bin/go install cmd/compile`, or rerun `make.bash`.

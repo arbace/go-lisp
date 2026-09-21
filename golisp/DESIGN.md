@@ -277,7 +277,7 @@ writing `SPEC.md`:
 | 3. Parser (go-lisp → AST) | done: `syntax/lisp_parser.go`, `syntax.ParseLisp`. The round trip is exact for all 11,588 valid Go files in `$GOROOT/src` and `$GOROOT/test`, and fuzzed. |
 | 4. Compiler hook | done: one line in `noder/noder.go` (`syntax.ParserFor`). `go tool compile` accepts `.lgo` files. 966 `$GOROOT/test` run programs converted to go-lisp behave identically to the Go originals (`go test cmd/compile/internal/syntax -run TestLispRunCorpus -lisprun`). 15 programs that inspect their own line numbers are excluded (F12). |
 | 5. `go build` support | not started |
-| 6. Tooling (`go2lisp`/`lisp2go` commands, diagnostics with go-lisp names, lisp2go parenthesization F9) | not started |
+| 6. Tooling | done: `go tool golisp` (`src/cmd/compile/golisp`) with `go2lisp`, `lisp2go` (gofmt-formatted, with parentheses added: `syntax.LispToGo`, F9), `build` and `run` (main packages of `.lgo` and `.go` files). `build`/`run` report compiler errors with go-lisp spellings of names (`-gonames` turns this off); expressions in messages stay in Go syntax. Go → go-lisp → Go reproduces every valid Go file in `$GOROOT`. |
 
 ## Decided
 
