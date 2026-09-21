@@ -19,24 +19,10 @@ import (
 var lispSrc = flag.String("lispsrc", "", "Go source file to print as go-lisp (TestLispPrintFile)")
 
 // lispPrintGo parses Go source and prints it as go-lisp,
-// keeping the //go: directives.
+// keeping its comments and //go: directives.
 func lispPrintGo(filename string, src string) (string, error) {
-	var dirs []lispDirective
-	pragh := func(pos Pos, blank bool, text string, current Pragma) Pragma {
-		if text != "" {
-			dirs = append(dirs, lispDirective{pos, blank, text})
-		}
-		return current
-	}
-	f, err := Parse(NewFileBase(filename), strings.NewReader(src), nil, pragh, 0)
-	if err != nil {
-		return "", err
-	}
-	var b strings.Builder
-	if err := lispPrint(&b, f, dirs); err != nil {
-		return "", err
-	}
-	return b.String(), nil
+	out, err := GoToLisp(filename, strings.NewReader(src))
+	return string(out), err
 }
 
 // TestLispPrintFile prints the file named by -lispsrc as go-lisp.

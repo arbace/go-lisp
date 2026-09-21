@@ -8,6 +8,7 @@
 package syntax
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"sort"
@@ -18,7 +19,16 @@ import (
 // lispPrint writes the go-lisp form of the file f to w.
 // Directives (//go: comments collected while parsing f) are
 // printed as ;go: comments before the declaration that follows them.
-func lispPrint(w io.Writer, f *File, dirs []lispDirective) (err error) {
+func lispPrint(w io.Writer, f *File, dirs []lispDirective) error {
+	return lispPrintComments(w, f, dirs, nil)
+}
+
+// lispPrintComments is like lispPrint, but also prints the given comments
+// of f's source (see lispGoComments) as ';' comments: comments that
+// follow code on their line at the end of the corresponding go-lisp line,
+// other comments on lines of their own before the next declaration,
+// statement, field, or clause.
+func lispPrintComments(w io.Writer, f *File, dirs []lispDirective, comments []lispGoComment) (err error) {
 	defer func() {
 		if e := recover(); e != nil {
 			if pe, ok := e.(lispPrintError); ok {
@@ -44,8 +54,18 @@ func lispPrint(w io.Writer, f *File, dirs []lispDirective) (err error) {
 	}
 
 	p := &lispPrinter{names: newLispNamer(imports)}
-	p.dirs = append(p.dirs, dirs...)
-	sort.SliceStable(p.dirs, func(i, j int) bool { return p.dirs[i].Pos.Cmp(p.dirs[j].Pos) < 0 })
+	blankDir := map[uint]bool{} // lines of directives preceded by a blank line
+	for _, c := range comments {
+		if c.Directive {
+			blankDir[c.Pos.Line()] = c.Blank
+			continue
+		}
+		p.notes = append(p.notes, lispNote{pos: c.Pos, lines: c.Lines, trailing: c.Trailing, blank: c.Blank})
+	}
+	for _, d := range dirs {
+		p.notes = append(p.notes, lispNote{pos: d.Pos, lines: []string{d.Text}, directive: true, blank: blankDir[d.Pos.Line()]})
+	}
+	sort.SliceStable(p.notes, func(i, j int) bool { return p.notes[i].pos.Cmp(p.notes[j].pos) < 0 })
 	p.file(f)
 	_, err = io.WriteString(w, p.buf.String())
 	return err
@@ -63,7 +83,16 @@ type lispPrinter struct {
 	buf    strings.Builder
 	names  *lispNamer
 	indent int
-	dirs   []lispDirective // pending directives, in source order
+	notes  []lispNote // pending directives and comments, in source order
+}
+
+// A lispNote is a directive or comment waiting to be printed.
+type lispNote struct {
+	pos       Pos
+	lines     []string // comment text lines (without markers), or the directive text
+	trailing  bool     // the comment follows code on its line
+	blank     bool     // a blank line precedes the note in the source
+	directive bool
 }
 
 func (p *lispPrinter) errorf(n Node, format string, args ...any) {
@@ -84,13 +113,54 @@ func (p *lispPrinter) nl() {
 	}
 }
 
-// flushDirectives prints the pending directives positioned before pos,
-// each on its own line.
-func (p *lispPrinter) flushDirectives(pos Pos) {
-	for len(p.dirs) > 0 && (!pos.IsKnown() || p.dirs[0].Pos.Cmp(pos) < 0) {
-		p.print(";", p.dirs[0].Text)
+// pending reports whether the next note is positioned before pos
+// (an unknown pos means: at the end of the file).
+func (p *lispPrinter) pending(pos Pos) bool {
+	return len(p.notes) > 0 && (!pos.IsKnown() || p.notes[0].pos.Cmp(pos) < 0)
+}
+
+// nlAt ends the current line and starts a new one for an element at
+// pos, with a blank line in between if blank is set. Trailing comments
+// before pos end the current line; other notes before pos are printed
+// on lines of their own before the element.
+func (p *lispPrinter) nlAt(pos Pos, blank bool) {
+	for p.pending(pos) && p.notes[0].trailing && len(p.notes[0].lines) == 1 {
+		p.print(" ;", lispCommentText(p.notes[0].lines[0]))
+		p.notes = p.notes[1:]
+	}
+	p.nl()
+	if blank {
 		p.nl()
-		p.dirs = p.dirs[1:]
+	}
+	p.leadingNotes(pos)
+}
+
+// lispCommentText returns the text of a comment line for printing
+// after ';' or ";;": with a space after the comment marker.
+func lispCommentText(line string) string {
+	if line == "" || line[0] == ' ' || line[0] == '\t' {
+		return line
+	}
+	return " " + line
+}
+
+// leadingNotes prints the notes before pos on lines of their own.
+func (p *lispPrinter) leadingNotes(pos Pos) {
+	for first := true; p.pending(pos); first = false {
+		n := p.notes[0]
+		p.notes = p.notes[1:]
+		if n.blank && !first {
+			p.nl() // keep blank lines between comment groups
+		}
+		if n.directive {
+			p.print(";", n.lines[0])
+			p.nl()
+			continue
+		}
+		for _, l := range n.lines {
+			p.print(";;", lispCommentText(l))
+			p.nl()
+		}
 	}
 }
 
@@ -105,20 +175,17 @@ func (p *lispPrinter) member(n *Name) string { return p.names.lispName(n.Value, 
 // Files and declarations
 
 func (p *lispPrinter) file(f *File) {
-	p.flushDirectives(f.Pos())
+	p.leadingNotes(f.Pos())
 	p.print("(package ", f.PkgName.Value, ")")
-	p.nl()
 
 	list := f.DeclList
 	for len(list) > 0 {
 		n := lispDeclRun(list)
-		p.nl()
-		p.flushDirectives(list[0].Pos())
+		p.nlAt(list[0].Pos(), true)
 		p.decls(list[:n])
-		p.nl()
 		list = list[n:]
 	}
-	p.flushDirectives(Pos{}) // any directives after the last declaration
+	p.nlAt(Pos{}, false) // notes after the last declaration
 }
 
 // lispDeclRun returns the length of the run of declarations at the start
@@ -177,8 +244,7 @@ func (p *lispPrinter) decls(list []Decl) {
 	case kw == "import":
 		p.indent++
 		for _, d := range list {
-			p.nl()
-			p.flushDirectives(d.Pos())
+			p.nlAt(d.Pos(), false)
 			p.spec(d)
 		}
 		p.indent--
@@ -189,8 +255,7 @@ func (p *lispPrinter) decls(list []Decl) {
 		// A group is a form whose arguments are all spec lists (D4).
 		p.indent++
 		for _, d := range list {
-			p.nl()
-			p.flushDirectives(d.Pos())
+			p.nlAt(d.Pos(), false)
 			p.print("(")
 			p.spec(d)
 			p.print(")")
@@ -388,7 +453,7 @@ func (p *lispPrinter) expr(x Expr) {
 		}
 		for _, e := range x.ElemList {
 			if multi {
-				p.nl()
+				p.nlAt(e.Pos(), false)
 			} else {
 				p.print(" ")
 			}
@@ -599,7 +664,7 @@ func (p *lispPrinter) structType(x *StructType) {
 	list := x.FieldList
 	for i := 0; i < len(list); {
 		f := list[i]
-		p.nl()
+		p.nlAt(f.Pos(), false)
 		p.print("[")
 		j := i + 1
 		if f.Name != nil {
@@ -630,7 +695,7 @@ func (p *lispPrinter) interfaceType(x *InterfaceType) {
 	p.print("(interface")
 	p.indent++
 	for _, m := range x.MethodList {
-		p.nl()
+		p.nlAt(m.Pos(), false)
 		if m.Name == nil {
 			p.expr(m.Type) // embedded type or type set term
 			continue
@@ -654,7 +719,7 @@ func (p *lispPrinter) interfaceType(x *InterfaceType) {
 func (p *lispPrinter) body(list []Stmt) {
 	p.indent++
 	for _, s := range list {
-		p.nl()
+		p.nlAt(s.Pos(), false)
 		p.stmt(s)
 	}
 	p.indent--
@@ -694,7 +759,7 @@ func (p *lispPrinter) stmt(s Stmt) {
 		}
 		for i := 0; len(list) > 0; i++ {
 			if i > 0 {
-				p.nl()
+				p.nlAt(list[0].Pos(), false)
 			}
 			n := lispDeclRun(list)
 			p.decls(list[:n])
@@ -739,7 +804,7 @@ func (p *lispPrinter) stmt(s Stmt) {
 		p.print("(select")
 		p.indent++
 		for _, c := range s.Body {
-			p.nl()
+			p.nlAt(c.Pos(), false)
 			if c.Comm == nil {
 				p.print("(default")
 			} else {
@@ -826,7 +891,7 @@ func (p *lispPrinter) ifStmt(s *IfStmt) {
 	p.ifClause(s)
 	p.indent++
 	for e := s.Else; e != nil; {
-		p.nl()
+		p.nlAt(e.Pos(), false)
 		switch x := e.(type) {
 		case *IfStmt:
 			// else if: a flat chain of trailing forms (D3)
@@ -949,7 +1014,7 @@ func (p *lispPrinter) switchStmt(s *SwitchStmt) {
 	}
 	p.indent++
 	for _, c := range s.Body {
-		p.nl()
+		p.nlAt(c.Pos(), false)
 		if c.Cases == nil {
 			p.print("(default")
 		} else {
@@ -970,8 +1035,8 @@ func (p *lispPrinter) switchStmt(s *SwitchStmt) {
 }
 
 // GoToLisp parses the Go source src and returns it as go-lisp source,
-// keeping its //go: directives as ;go: directives.
-// Comments other than directives are not kept.
+// keeping its comments as ';' comments and its //go: directives as ;go:
+// directives. Line directives (//line) are not kept.
 func GoToLisp(filename string, src io.Reader) ([]byte, error) {
 	var dirs []lispDirective
 	pragh := func(pos Pos, blank bool, text string, current Pragma) Pragma {
@@ -980,13 +1045,81 @@ func GoToLisp(filename string, src io.Reader) ([]byte, error) {
 		}
 		return current
 	}
-	f, err := Parse(NewFileBase(filename), src, nil, pragh, 0)
+	data, err := io.ReadAll(src)
+	if err != nil {
+		return nil, err
+	}
+	base := NewFileBase(filename)
+	f, err := Parse(base, bytes.NewReader(data), nil, pragh, 0)
 	if err != nil {
 		return nil, err
 	}
 	var b strings.Builder
-	if err := lispPrint(&b, f, dirs); err != nil {
+	if err := lispPrintComments(&b, f, dirs, lispGoComments(base, data)); err != nil {
 		return nil, err
 	}
 	return []byte(b.String()), nil
+}
+
+// A lispGoComment is a comment of Go source.
+type lispGoComment struct {
+	Pos       Pos
+	Lines     []string // text lines, without comment markers
+	Trailing  bool     // the comment follows a token on its line
+	Blank     bool     // a blank line precedes the comment
+	Directive bool     // a //go: directive (printed from the pragma handler's list)
+}
+
+// lispGoComments returns the comments of the Go source src, except for
+// directives (//go:, //line, /*line), which the parser reports to the
+// pragma handler or applies itself.
+func lispGoComments(base *PosBase, src []byte) []lispGoComment {
+	var list []lispGoComment
+	var tokLine uint  // line of the most recent token
+	var lastLine uint // last line of the most recent token or comment
+	var s scanner
+	s.init(bytes.NewReader(src), func(line, col uint, text string) {
+		if text[0] != '/' {
+			return // an error, reported by the parser
+		}
+		text = strings.TrimSuffix(text, "\r")
+		c := lispGoComment{Pos: MakePos(base, line, col), Trailing: tokLine == line, Blank: lastLine != 0 && line > lastLine+1}
+		lastLine = line + uint(strings.Count(text, "\n"))
+		if strings.HasPrefix(text, "//") {
+			body := text[2:]
+			switch {
+			case strings.HasPrefix(body, "go:"):
+				c.Directive = true
+			case strings.HasPrefix(body, "line "):
+				return
+			}
+			c.Lines = []string{body}
+		} else {
+			body := strings.TrimSuffix(text[2:], "*/")
+			if strings.HasPrefix(body, "line ") {
+				return
+			}
+			for _, l := range strings.Split(body, "\n") {
+				c.Lines = append(c.Lines, strings.TrimRight(l, " \t\r"))
+			}
+			// drop the empty first and last lines of /*\n...\n*/
+			if len(c.Lines) > 1 && c.Lines[0] == "" {
+				c.Lines = c.Lines[1:]
+			}
+			if len(c.Lines) > 1 && c.Lines[len(c.Lines)-1] == "" {
+				c.Lines = c.Lines[:len(c.Lines)-1]
+			}
+		}
+		list = append(list, c)
+	}, comments)
+	for {
+		s.next()
+		if s.tok == _EOF {
+			return list
+		}
+		if s.tok != _Semi || s.lit == "semicolon" {
+			tokLine = s.line
+			lastLine = s.line
+		}
+	}
 }

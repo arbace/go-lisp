@@ -74,9 +74,9 @@ func TestConvert(t *testing.T) {
 }
 
 func TestDroppedComments(t *testing.T) {
-	src := "//go:build linux\n\n// Package p.\npackage p /* x */\n\n//go:noinline\nfunc f() {} // f\n"
-	if n := droppedComments("x.go", []byte(src)); n != 3 {
-		t.Errorf("got %d dropped comments; want 3", n)
+	src := "//go:build linux\n\n// Package p.\npackage p /* x */\n\n//line x.go:10\n//go:noinline\nfunc f() {} /*line y.go:1*/ // f\n"
+	if n := droppedComments("x.go", []byte(src)); n != 2 {
+		t.Errorf("got %d dropped comments; want 2 (the line directives)", n)
 	}
 }
 

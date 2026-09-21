@@ -314,6 +314,12 @@ normalizations, each of which is semantically neutral:
 String literals are compared **exactly** **[F13]**. The reader keeps
 Values verbatim, so any difference is a bug.
 
+**Exceptions to the reverse direction:** trees that Go's own syntax
+printer can't print either, and type parameter constraints that aren't
+type expressions (such as `type A[P ~0] int` or `[P ~A%B]`). Neither is
+ever valid Go, but the Go parser accepts them, and Go can express the
+latter only through parentheses (the call form `A[P(~0)]`).
+
 **[F9] The reverse direction** is tested too, and is implemented in
 `syntax.LispToGo` / `syntax.LispParenthesize`:
 `Lisp → AST → Go (lisp2go, with parens inserted) → AST'`. It must give the

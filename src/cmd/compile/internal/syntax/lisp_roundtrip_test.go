@@ -28,15 +28,26 @@ func lispRoundTrip(filename string, src []byte) (lisp, diff string) {
 		}
 		return current // nil: the trees carry no pragmas
 	}
-	f1, err := Parse(NewFileBase(filename), bytes.NewReader(src), nil, pragh, 0)
+	base := NewFileBase(filename)
+	f1, err := Parse(base, bytes.NewReader(src), nil, pragh, 0)
 	if err != nil {
 		return "", "" // not valid Go syntax; nothing to compare
 	}
+	comments := lispGoComments(base, src)
 	var b strings.Builder
-	if err := lispPrint(&b, f1, dirs); err != nil {
+	if err := lispPrintComments(&b, f1, dirs, comments); err != nil {
 		return "", fmt.Sprintf("print: %v", err)
 	}
 	lisp = b.String()
+	// Every comment must be kept (printed comments must not swallow code,
+	// which the tree comparison below checks).
+	for _, c := range comments {
+		for _, l := range c.Lines {
+			if l = strings.TrimSpace(l); l != "" && !strings.Contains(lisp, l) {
+				return lisp, fmt.Sprintf("comment %q at %s is missing", l, c.Pos)
+			}
+		}
+	}
 	var errs []string
 	f2, _ := ParseLisp(NewFileBase(filename), strings.NewReader(lisp), func(err error) {
 		errs = append(errs, err.Error())
@@ -269,10 +280,17 @@ func FuzzLispRoundTrip(f *testing.F) {
 		"package p; func (T) m[P any]() {}; func g(...int)",
 		"package p; func f() { select { case x := <-c: case c <- 1: default: }; switch x := y.(type) {} }",
 		"package p; var _ = func() {}; var _ = [...]int{1: 2}; var _ = map[[2]int]int{{1, 2}: 3}",
+		"// doc\npackage p // t\n/* a\nb */ func f() { x := 1 /* c */; _ = x // d\n}\n// end",
 	} {
 		f.Add(seed)
 	}
 	f.Fuzz(func(t *testing.T, src string) {
+		if strings.IndexByte(src, 0) >= 0 {
+			// Go's scanner misses some NUL bytes (for example at offset
+			// 8209 of a file), so it accepts sources that go-lisp's
+			// reader correctly rejects.
+			return
+		}
 		if lisp, d := lispRoundTrip("fuzz.go", []byte(src)); d != "" {
 			t.Fatalf("round trip of %q: %s\n%s", src, d, lisp)
 		}
@@ -288,8 +306,11 @@ func FuzzLispRoundTrip(f *testing.F) {
 func lispRoundTripGo(filename string, src []byte) (goSrc, diff string) {
 	goSrc, diff = lispRoundTripGo1(filename, src)
 	if diff != "" {
-		// Excuse failures only where Go's own printer fails as well.
-		if f, err := Parse(NewFileBase(filename), bytes.NewReader(src), nil, nil, 0); err == nil && !lispGoPrintable(f) {
+		// Excuse failures only where Go's own printer fails as well, or
+		// for type parameter constraints that are not type expressions
+		// (never valid Go), which Go can only express with parentheses
+		// (SPEC §8).
+		if f, err := Parse(NewFileBase(filename), bytes.NewReader(src), nil, nil, 0); err == nil && (!lispGoPrintable(f) || lispHasNonTypeConstraint(f)) {
 			return goSrc, lispNotPrintable
 		}
 	}
@@ -330,6 +351,65 @@ func lispRoundTripGo1(filename string, src []byte) (goSrc, diff string) {
 		return string(out), fmt.Sprintf("directives %q vs %q", dirs1, dirs2)
 	}
 	return string(out), ""
+}
+
+// lispHasNonTypeConstraint reports whether a type parameter constraint
+// in f is not a type set expression (as in type A[P ~0] int, [P ~A%B],
+// or [P *~A]), which is never valid Go.
+func lispHasNonTypeConstraint(f *File) bool {
+	// isType reports whether x is a type expression; term says whether
+	// x is a term of a union, where ~ is allowed.
+	var isType func(x Expr, term bool) bool
+	isType = func(x Expr, term bool) bool {
+		switch x := x.(type) {
+		case *Name, *ArrayType, *SliceType, *MapType, *ChanType, *FuncType, *StructType, *InterfaceType:
+			return true
+		case *SelectorExpr:
+			_, ok := x.X.(*Name) // pkg.T
+			return ok
+		case *IndexExpr:
+			// an instantiation T[A, B]
+			if !isType(x.X, false) {
+				return false
+			}
+			for _, a := range lispUnpackList(x.Index) {
+				if !isType(a, false) {
+					return false
+				}
+			}
+			return true
+		case *ParenExpr:
+			return isType(x.X, false) // unions and ~ only at the top level
+		case *Operation:
+			switch {
+			case x.Op == Or && x.Y != nil:
+				return term && isType(x.X, true) && isType(x.Y, true)
+			case x.Op == Tilde && x.Y == nil:
+				return term && isType(x.X, false)
+			case x.Op == Mul && x.Y == nil:
+				return isType(x.X, false)
+			}
+		}
+		return false
+	}
+	found := false
+	check := func(list []*Field) {
+		for _, fld := range list {
+			if !isType(fld.Type, true) {
+				found = true
+			}
+		}
+	}
+	Inspect(f, func(n Node) bool {
+		switch n := n.(type) {
+		case *FuncDecl:
+			check(n.TParamList)
+		case *TypeDecl:
+			check(n.TParamList)
+		}
+		return !found
+	})
+	return found
 }
 
 // lispNotPrintable is the diff reported for trees that Go's own printer

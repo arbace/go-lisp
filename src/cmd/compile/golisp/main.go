@@ -13,8 +13,10 @@
 //
 // go2lisp prints each Go file as go-lisp, and lisp2go prints each go-lisp
 // file as gofmt-formatted Go. With -w, the result is written to a file
-// next to the input with the other extension instead. Comments are not
-// kept, except for //go: directives; go2lisp warns about dropped comments.
+// next to the input with the other extension instead. go2lisp keeps
+// comments (as ';' comments) and //go: directives; it drops line
+// directives (//line), and warns about them. lisp2go keeps ;go:
+// directives but not other comments.
 //
 // build compiles and links the given files, which must form a main
 // package, into an executable (named after the first file by default).
@@ -152,7 +154,7 @@ func convert(cmd, file string, write bool, stdout, stderr *os.File) error {
 	var ext string
 	if cmd == "go2lisp" {
 		if n := droppedComments(file, src); n > 0 {
-			fmt.Fprintf(stderr, "golisp: %s: warning: %d comment(s) dropped (only //go: directives are kept)\n", file, n)
+			fmt.Fprintf(stderr, "golisp: %s: warning: %d line directive(s) dropped\n", file, n)
 		}
 		out, err = syntax.GoToLisp(file, bytes.NewReader(src))
 		ext = ".lgo"
@@ -185,7 +187,7 @@ func lispToGo(file string, src []byte) ([]byte, error) {
 }
 
 // droppedComments counts the comments in Go source that go2lisp drops:
-// all but //go: directives.
+// line directives (//line and /*line*/).
 func droppedComments(file string, src []byte) int {
 	var s scanner.Scanner
 	fset := token.NewFileSet()
@@ -196,7 +198,7 @@ func droppedComments(file string, src []byte) int {
 		if tok == token.EOF {
 			return n
 		}
-		if tok == token.COMMENT && !strings.HasPrefix(lit, "//go:") {
+		if tok == token.COMMENT && (strings.HasPrefix(lit, "//line ") || strings.HasPrefix(lit, "/*line ")) {
 			n++
 		}
 	}

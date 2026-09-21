@@ -126,9 +126,15 @@ func LispParenthesize(root Node) {
 		case *CallExpr:
 			n.Fun = lispParenOperand(n.Fun)
 			// f(1 ...) must not print as f(1...), which lexes as 1. and ..
-			if k := len(n.ArgList) - 1; n.HasDots && k >= 0 && lispIsNumber(n.ArgList[k]) {
+			if k := len(n.ArgList) - 1; n.HasDots && k >= 0 && lispEndsWithNumber(n.ArgList[k]) {
 				n.ArgList[k] = lispParen(n.ArgList[k])
 			}
+		case *ExprStmt:
+			n.X = lispParenLeadingBrace(n.X)
+		case *AssignStmt:
+			n.Lhs = lispParenLeadingBrace(n.Lhs)
+		case *SendStmt:
+			n.Chan = lispParenLeadingBrace(n.Chan)
 		case *BlockStmt:
 			n.List = lispDropEmptyDecls(n.List)
 		case *CaseClause:
@@ -144,7 +150,12 @@ func LispParenthesize(root Node) {
 			if c, ok := n.Elem.(*ChanType); ok && n.Dir == 0 && c.Dir == RecvOnly {
 				n.Elem = lispParen(n.Elem)
 			}
+		case *FuncDecl:
+			lispParenTerms(n.TParamList)
+		case *InterfaceType:
+			lispParenTerms(n.MethodList)
 		case *TypeDecl:
+			lispParenTerms(n.TParamList)
 			// type T [N]E: an array length that the parser would read
 			// as a type parameter list ([P C]) needs parentheses. Only
 			// invalid array lengths can look like that, but the Go
@@ -264,6 +275,91 @@ func lispParenOperand(x Expr) Expr {
 		return lispParen(x)
 	}
 	return x
+}
+
+// lispParenTerms parenthesizes the literals among the union terms of
+// type parameter constraints and interface elements: the Go parser
+// expects a type there and accepts a literal only in parentheses. (Only
+// invalid programs have such terms, but the Go parser accepts them.)
+func lispParenTerms(list []*Field) {
+	var term func(x Expr) Expr
+	term = func(x Expr) Expr {
+		switch e := x.(type) {
+		case *BasicLit:
+			return lispParen(e)
+		case *Operation:
+			if e.Op == Or && e.Y != nil {
+				e.X, e.Y = term(e.X), term(e.Y)
+			}
+		}
+		return x
+	}
+	for _, f := range list {
+		if _, method := f.Type.(*FuncType); method && f.Name != nil {
+			continue
+		}
+		f.Type = term(f.Type)
+	}
+}
+
+// lispEndsWithNumber reports whether x, printed as Go, ends with a
+// number literal (as 1, a + 1, or -1 do).
+func lispEndsWithNumber(x Expr) bool {
+	for {
+		switch e := x.(type) {
+		case *Operation:
+			if e.Y != nil {
+				x = e.Y
+			} else {
+				x = e.X
+			}
+		default:
+			return lispIsNumber(x)
+		}
+	}
+}
+
+// lispParenLeadingBrace parenthesizes x if, printed as Go, it would start
+// with '{' (a composite literal without a type, as in {}.f), which at the
+// start of a statement reads as a block, or with '~', which cannot start
+// a statement.
+func lispParenLeadingBrace(x Expr) Expr {
+	for e := x; ; {
+		switch y := e.(type) {
+		case *CompositeLit:
+			if y.Type == nil {
+				return lispParen(x)
+			}
+			return x
+		case *Operation:
+			if y.Y == nil {
+				if y.Op == Tilde {
+					return lispParen(x)
+				}
+				return x // starts with the operator
+			}
+			e = y.X
+		case *CallExpr:
+			e = y.Fun
+		case *SelectorExpr:
+			e = y.X
+		case *IndexExpr:
+			e = y.X
+		case *SliceExpr:
+			e = y.X
+		case *AssertExpr:
+			e = y.X
+		case *ListExpr:
+			if len(y.ElemList) == 0 {
+				return x
+			}
+			// only the first element starts the statement
+			y.ElemList[0] = lispParenLeadingBrace(y.ElemList[0])
+			return x
+		default:
+			return x
+		}
+	}
 }
 
 func lispIsNumber(x Expr) bool {
