@@ -67,12 +67,12 @@ the Go names.
 ```clojure
 ;go:build linux || darwin
 
-(package main)                     ; package names are never mapped
+(package main)                     ; the package clause is never mapped
 
 (import "fmt"
         "os"
         "regexp"
-        [str "strings"]            ; alias: Str
+        [str "strings"]            ; alias str (import names map verbatim)
         [_ "embed"])
 
 (type shape                        ; type Shape
@@ -117,7 +117,7 @@ the Go names.
 (func main [] []                               ; main: never mapped
   (:= r (:lit rect (:kv :w 3) (:kv :h 4)))     ; Rect{W: 3, H: 4}
   (fmt.println (r.area))                       ; fmt.Println(R.Area())
-  (:= rd (str.new-reader "x"))                 ; Str.NewReader
+  (:= rd (str.new-reader "x"))                 ; str.NewReader
   (:= [data err] (io.read-all rd))             ; io.ReadAll
   (if (== err io.EOF) (return))                ; acronym segment stays as written
   (http.handle-func "/" handler)               ; http.HandleFunc
@@ -164,7 +164,6 @@ have an **exemption list** of names that map verbatim:
   `comparable`, `true`, `false`, `nil`, `iota`, `len`, `make`, `new`,
   `append`, `panic`, `print`, `println`, `min`, `max`, `clear`, ...
 - `main` and `init`
-- the package name in `(package ...)`
 - this file's **implicit import names**. They are guessed from the import
   path: the last element, or the one before it when the last is `vN`. If the
   imported package is really named something else, give it an alias:
@@ -337,9 +336,10 @@ writing `SPEC.md`:
   allowed. Runes are Go literals: `'a'`, `'\n'`, `'\x07'`, `'\U0001F600'`.
   This departs from EDN on purpose: there are no EDN `\c` chars, and D2
   left `'` unused.
-- **D18 (2026-09-21): names.** Kebab-case, exported by default, `-name`
+- **D18 (2026-09-21): names.** (SPEC.md §6 refines this: the package
+  name is not exempt, the exemption list is frozen, declaring an exempt
+  name needs `-`, and import aliases are exempt.) Kebab-case, exported by default, `-name`
   unexported (like Clojure's `defn-`). A segment written in capitals stays
   as written (`serve-HTTP`, `io.EOF`). Bare names have an exemption list:
-  predeclared names, `main`, `init`, the package name, and implicit import
-  names. The mapping is lexical, in the parser, with no types2 changes.
+  predeclared names, `main`, `init`, and import names. The mapping is lexical, in the parser, with no types2 changes.
   Full rules are in §4.2.
