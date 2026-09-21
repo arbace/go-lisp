@@ -1,0 +1,30 @@
+# go-lisp (.lgo) files in modules from the module cache are built.
+
+go mod tidy
+go list -m example.com/golisp
+stdout '^example.com/golisp v1.0.0$'
+go list -f '{{.GoFiles}}' example.com/golisp/lisp example.com/golisp/mixed
+stdout '^\[lisp.lgo\]$'
+stdout '^\[mixed.lgo who.go\]$'
+
+go run .
+stdout '^hello, module cache$'
+
+-- go.mod --
+module example.com/main
+
+go 1.28
+
+require example.com/golisp v1.0.0
+-- main.go --
+package main
+
+import (
+	"fmt"
+
+	"example.com/golisp/mixed"
+)
+
+func main() {
+	fmt.Println(mixed.Message())
+}

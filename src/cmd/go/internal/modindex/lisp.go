@@ -8,7 +8,9 @@ import (
 	"fmt"
 	"internal/golisp"
 
+	"cmd/go/internal/cfg"
 	"cmd/go/internal/fsys"
+	"cmd/go/internal/str"
 )
 
 // errLispFiles reports that a package directory has go-lisp (.lgo) files.
@@ -17,7 +19,12 @@ import (
 var errLispFiles = fmt.Errorf("%w: package has go-lisp files", ErrNotIndexed)
 
 // hasLispFiles reports whether dir contains go-lisp source files.
+// Directories in GOROOT are not checked: the standard library and the
+// commands are written in Go, and they are loaded often.
 func hasLispFiles(dir string) bool {
+	if str.HasFilePathPrefix(dir, cfg.GOROOTsrc) {
+		return false
+	}
 	entries, err := fsys.ReadDir(dir)
 	if err != nil {
 		return false

@@ -1,0 +1,29 @@
+example.com/golisp v1.0.0
+written by hand: a module with go-lisp (.lgo) files
+
+-- .mod --
+module example.com/golisp
+
+go 1.28
+-- .info --
+{"Version":"v1.0.0"}
+-- go.mod --
+module example.com/golisp
+
+go 1.28
+-- lisp/lisp.lgo --
+(package lisp)
+
+(func greet [-name string] [string]
+  (return (+ "hello, " -name)))
+-- mixed/mixed.lgo --
+(package mixed)
+
+(import "example.com/golisp/lisp")
+
+(func message [] [string]
+  (return (lisp.greet (who))))
+-- mixed/who.go --
+package mixed
+
+func Who() string { return "module cache" }

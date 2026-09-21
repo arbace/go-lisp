@@ -287,10 +287,9 @@ writing `SPEC.md`:
   cgo, gopls, and other `go/ast`-based tools.
 - **Examples:** go-lisp examples compile but aren't run, because there are
   no `// Output:` comments.
-- **Module cache:** `.lgo` files in modules in the module cache are not
-  seen, because the whole-module index reads Go files only. This covers
-  dependencies fetched from a proxy. The main module, workspace modules and
-  `replace` directories work.
+- **Module cache:** packages with `.lgo` files in module-cache modules
+  are loaded with go/build instead of the Go-only module index (script
+  test `golisp_modcache`).
 
 ## Decided
 

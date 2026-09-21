@@ -131,6 +131,9 @@ var (
 // using the index, for instance because the index is disabled, or the package
 // is not in a module.
 func GetPackage(modroot, pkgdir string) (*IndexPackage, error) {
+	if hasLispFiles(pkgdir) { // go-lisp: load .lgo packages with go/build
+		return nil, errLispFiles
+	}
 	mi, err := GetModule(modroot)
 	if err == nil {
 		return mi.Package(relPath(pkgdir, modroot)), nil
@@ -148,9 +151,6 @@ func GetPackage(modroot, pkgdir string) (*IndexPackage, error) {
 	}
 	modroot = filepath.Clean(modroot)
 	pkgdir = filepath.Clean(pkgdir)
-	if hasLispFiles(pkgdir) { // go-lisp: load .lgo packages with go/build
-		return nil, errLispFiles
-	}
 	return openIndexPackage(modroot, pkgdir)
 }
 
