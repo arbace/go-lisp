@@ -142,9 +142,9 @@ var bootstrapDirs = []string{
 	"internal/goarch",
 	"internal/godebugs",
 	"internal/goexperiment",
+	"internal/golisp", // go-lisp: imported by cmd/go/internal/imports, which is bootstrap-copied
 	"internal/goroot",
 	"internal/gover",
-	"internal/golisp", // go-lisp: imported by cmd/go/internal/imports, which is bootstrap-copied
 	"internal/goversion",
 	// internal/lazyregexp is provided by Go 1.17, which permits it to
 	// be imported by other packages in this list, but is not provided

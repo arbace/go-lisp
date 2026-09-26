@@ -11,3 +11,12 @@ package tool
 var lispTools = map[string]string{
 	"golisp": "cmd/compile/golisp",
 }
+
+// lispToolPath returns the package of the go-lisp tool toolName,
+// or cmdTool if toolName is not one.
+func lispToolPath(toolName, cmdTool string) string {
+	if t, ok := lispTools[toolName]; ok {
+		return t
+	}
+	return cmdTool
+}

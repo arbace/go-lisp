@@ -61,7 +61,8 @@ The goal is painless merges from upstream golang/go.
 - Upstream hooks (all marked, `git grep 'go-lisp:'`): `noder/noder.go`
   (parser choice); `go/build/build.go` and `deps_test.go`; `cmd/go`
   `fsys`, `imports`, `load`, `modindex`, `run`, `work` (vet skip, cover
-  conversion), and `base` (`_test.lgo`); `cmd/cover` (line directives for
+  conversion), `base` (`_test.lgo`) and `tool` (`go tool golisp`);
+  `cmd/dist/buildtool.go` (bootstraps `internal/golisp`); `cmd/cover` (line directives for
   converted go-lisp); the compiler's `-lisp2go` flag (`base/flag.go`,
   `gc/main.go`, `noder/lisp.go`). New
   shared code lives in `src/internal/golisp` (the header reader used by

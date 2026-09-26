@@ -301,9 +301,7 @@ func loadBuiltinTool(toolName string) string {
 		return ""
 	}
 	cmdTool := path.Join("cmd", toolName)
-	if t, ok := lispTools[toolName]; ok { // go-lisp: a tool that lives under cmd/compile
-		cmdTool = t
-	}
+	cmdTool = lispToolPath(toolName, cmdTool) // go-lisp: golisp lives under cmd/compile
 	if !modindex.IsStandardPackage(cfg.GOROOT, cfg.BuildContext.Compiler, cmdTool) {
 		return ""
 	}
