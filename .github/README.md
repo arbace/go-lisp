@@ -45,8 +45,8 @@ name unexported).
   test programs behave the same when compiled from `.lgo`
 - Vim/Neovim support
 
-The syntax is described with worked examples in
-[DESIGN.md](../golisp/DESIGN.md), and form by form in
+Start with the **[user guide and cheat sheet](../golisp/README.md)**. The
+design is in [DESIGN.md](../golisp/DESIGN.md) and the full grammar in
 [SPEC.md](../golisp/SPEC.md).
 
 ## Relation to Go
